@@ -21,38 +21,62 @@ interface SynthConfig {
   glide?: number
   /** roughness: detuned second oscillator + breathy noise */
   grain?: boolean
+  /** pluck decay: seconds to fall to ~5% (default: rings for the note length) */
+  decay?: number
   /**
-   * vocal formant: a bandpass resonance at ~4x the fundamental, pinned to
-   * the 1.0–2.6 kHz band. Measured from luteboi's real "The Cat" renders,
-   * where the 4th harmonic dominates (h4=1.0, h5=0.6, h1=0.08 at C4) and the
-   * peak sits near 1.04 kHz for C3/C4.
+   * vocal/instrumental formant: a bandpass resonance at mul x the
+   * fundamental, clamped to [min, max] Hz, with a quiet direct "body" path
+   * whose gain is body/freq. All values measured from real luteboi renders
+   * (e.g. The Cat peaks at h4 ~1.04kHz, Choir at h2, Harmonica at h5).
    */
-  formant?: boolean
+  formant?: { mul: number; q: number; min: number; max: number; body: number }
 }
 
+// Every config below is tuned against real luteboi renders (C3/C4/C5 test
+// lutings, analyzed for pitch offset, envelope, decay rate, vibrato and
+// harmonic spectrum). Notable measured truths: Bean/Overdriven/Slap Bass play
+// an octave below written; Choir/Harmonica/Horn/Slap Bass/Bean/Cat have
+// formant resonances; Bell/Vibraphone/Ocarina are near-pure sines.
 const SYNTHS: Record<string, SynthConfig> = {
-  l: { wave: 'triangle', style: 'pluck', cutoff: 6, release: 0.3, gain: 1 },
-  b: { wave: 'sawtooth', style: 'pluck', cutoff: 3, release: 0.2, gain: 1.1, sub: true },
-  f: { wave: 'sine', style: 'sustain', cutoff: 8, release: 0.1, gain: 1 },
-  k: { wave: 'triangle', style: 'pluck', cutoff: 9, release: 0.4, gain: 1 },
-  c: { wave: 'square', style: 'sustain', cutoff: 12, release: 0.02, gain: 0.5 },
-  // tuned against real luteboi renders: written pitch (no octave shift), a
-  // rise from ~70 cents flat into the note, ±15 cent waver, ~100ms release
-  m: { wave: 'sawtooth', style: 'sustain', cutoff: 6, release: 0.1, gain: 1.5, vibrato: 15, glide: -70, grain: true, formant: true },
-  t: { wave: 'sine', style: 'pluck', cutoff: 4, release: 0.15, gain: 1.2 },
-  p: { wave: 'triangle', style: 'pluck', cutoff: 5, release: 0.1, gain: 1.1 },
+  // bright plucked string: strong h2/h4 (1, .79, .17, .39), decays to ~17% by 0.85s
+  l: { wave: 'sawtooth', style: 'pluck', cutoff: 4.5, release: 0.3, gain: 0.9, decay: 1.3 },
+  // much darker than expected: h2 only .09 — nearly a pure sine, slow decay
+  b: { wave: 'triangle', style: 'pluck', cutoff: 2, release: 0.25, gain: 1.5, sub: true, decay: 1.6 },
+  // sine plus a healthy octave partial (h2 .55)
+  f: { wave: 'triangle', style: 'sustain', cutoff: 3.5, release: 0.12, gain: 1.0 },
+  // the octave harmonic DOMINATES the fundamental (h2 1.0 vs h1 .54)
+  k: { wave: 'sawtooth', style: 'pluck', cutoff: 5, release: 0.3, gain: 0.9, decay: 0.9 },
+  // textbook filtered square (1, 0, .21, 0, .06), hard on/off envelope
+  c: { wave: 'square', style: 'sustain', cutoff: 4, release: 0.02, gain: 0.55 },
+  // meow: written pitch, rises ~70 cents into the note, formant at h4 (~1kHz)
+  m: { wave: 'sawtooth', style: 'sustain', cutoff: 6, release: 0.1, gain: 1.5, vibrato: 15, glide: -70, grain: true, formant: { mul: 4, q: 5, min: 1000, max: 2600, body: 18 } },
+  // plays an OCTAVE DOWN; vocal formant around 2x the (shifted) fundamental
+  t: { wave: 'sawtooth', style: 'sustain', cutoff: 5, release: 0.1, gain: 0.9, octaveShift: -1, formant: { mul: 2, q: 2.5, min: 150, max: 1200, body: 60 } },
+  // a 0.2s inharmonic thwack
+  p: { wave: 'triangle', style: 'pluck', cutoff: 8, release: 0.1, gain: 0.5, decay: 0.18 },
   d: { wave: 'triangle', style: 'pluck', cutoff: 5, release: 0.1, gain: 1 }, // unused; drums use generators
-  a: { wave: 'sine', style: 'pluck', cutoff: 10, release: 1.4, gain: 0.9 },
-  o: { wave: 'sawtooth', style: 'sustain', cutoff: 4, release: 0.15, gain: 0.7, sub: true },
-  e: { wave: 'sawtooth', style: 'sustain', cutoff: 2.5, release: 0.25, gain: 0.8, vibrato: 12 },
-  v: { wave: 'sawtooth', style: 'sustain', cutoff: 5, release: 0.2, gain: 0.7, vibrato: 18 },
-  g: { wave: 'sine', style: 'sustain', cutoff: 6, release: 0.08, gain: 1 },
-  h: { wave: 'sawtooth', style: 'sustain', cutoff: 3.5, release: 0.15, gain: 0.8 },
-  i: { wave: 'sine', style: 'pluck', cutoff: 12, release: 1.1, gain: 0.9, vibrato: 10 },
-  j: { wave: 'square', style: 'sustain', cutoff: 3, release: 0.1, gain: 0.55 },
-  s: { wave: 'sawtooth', style: 'sustain', cutoff: 4.5, release: 0.12, gain: 0.75, vibrato: 14 },
-  n: { wave: 'square', style: 'sustain', cutoff: 5, release: 0.1, gain: 0.5 },
-  q: { wave: 'triangle', style: 'pluck', cutoff: 4, release: 0.12, gain: 1.2, sub: true },
+  // near-pure sine (h2 .01) ringing past 2 seconds
+  a: { wave: 'sine', style: 'pluck', cutoff: 10, release: 0.5, gain: 1.0, decay: 2.2 },
+  // drawbar stack: strong h2/h4/h8 partials
+  o: { wave: 'sawtooth', style: 'sustain', cutoff: 4.5, release: 0.15, gain: 0.65, sub: true },
+  // "aah": h2 dominates, fundamental almost absent (h1 .04)
+  e: { wave: 'sawtooth', style: 'sustain', cutoff: 6, release: 0.25, gain: 0.75, vibrato: 12, formant: { mul: 2, q: 6, min: 200, max: 1600, body: 8 } },
+  // bright saw-like bowed spectrum (h2 .97)
+  v: { wave: 'sawtooth', style: 'sustain', cutoff: 5, release: 0.2, gain: 0.85, vibrato: 15 },
+  // confirmed near-pure sine
+  g: { wave: 'sine', style: 'sustain', cutoff: 6, release: 0.08, gain: 1.1 },
+  // brassy resonance around h2-h3
+  h: { wave: 'sawtooth', style: 'sustain', cutoff: 3, release: 0.15, gain: 0.7, formant: { mul: 2.5, q: 2, min: 300, max: 2000, body: 90 } },
+  // near-pure sine, ~1.5s ring, no audible tremolo
+  i: { wave: 'sine', style: 'pluck', cutoff: 12, release: 0.6, gain: 1.0, decay: 1.5 },
+  // OCTAVE DOWN, dense distorted spectrum
+  j: { wave: 'square', style: 'sustain', cutoff: 4, release: 0.1, gain: 0.55, octaveShift: -1, grain: true },
+  // far mellower than a raw saw (h2 .3, little above)
+  s: { wave: 'sawtooth', style: 'sustain', cutoff: 2.5, release: 0.12, gain: 0.8, vibrato: 10 },
+  // striking reed resonance at the FIFTH harmonic (~1.3kHz)
+  n: { wave: 'sawtooth', style: 'sustain', cutoff: 7, release: 0.1, gain: 0.7, formant: { mul: 5, q: 3.5, min: 800, max: 3500, body: 200 } },
+  // OCTAVE DOWN, slap formant at h3
+  q: { wave: 'sawtooth', style: 'pluck', cutoff: 4, release: 0.15, gain: 1.0, octaveShift: -1, decay: 1.0, formant: { mul: 3, q: 3, min: 200, max: 1500, body: 70 } },
 }
 
 let noiseBuffer: AudioBuffer | null = null
@@ -76,16 +100,16 @@ function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
   const filter = ctx.createBiquadFilter()
   let bodyFilter: BiquadFilterNode | null = null
   if (cfg.formant) {
+    const f = cfg.formant
     filter.type = 'bandpass'
-    filter.frequency.value = Math.min(2600, Math.max(1000, freq * 4))
-    filter.Q.value = 5
-    // a quiet direct path keeps the fundamental's body, stronger on low
-    // notes (the real C3 render keeps h1 at 0.89; C4 suppresses it to 0.08)
+    filter.frequency.value = Math.min(f.max, Math.max(f.min, freq * f.mul))
+    filter.Q.value = f.q
+    // a quiet direct path keeps the fundamental's body, stronger on low notes
     bodyFilter = ctx.createBiquadFilter()
     bodyFilter.type = 'lowpass'
     bodyFilter.frequency.value = freq * 2.5
     const bodyGain = ctx.createGain()
-    bodyGain.gain.value = Math.min(0.35, 18 / freq)
+    bodyGain.gain.value = Math.min(0.5, f.body / freq)
     bodyFilter.connect(bodyGain)
     bodyGain.connect(gain)
   } else {
@@ -100,8 +124,9 @@ function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
   g.setValueAtTime(0, start)
   if (cfg.style === 'pluck') {
     g.linearRampToValueAtTime(peak, start + 0.005)
-    const decayEnd = Math.min(holdEnd, start + 2.5)
-    g.exponentialRampToValueAtTime(Math.max(peak * 0.05, 0.001), decayEnd + cfg.release)
+    // decay at the instrument's own rate, cut short by the note's end
+    const decayEnd = Math.min(start + 0.005 + (cfg.decay ?? 2.5), holdEnd + cfg.release)
+    g.exponentialRampToValueAtTime(Math.max(peak * 0.05, 0.001), decayEnd)
     g.linearRampToValueAtTime(0, stopAt)
   } else {
     g.linearRampToValueAtTime(peak, start + 0.04)
