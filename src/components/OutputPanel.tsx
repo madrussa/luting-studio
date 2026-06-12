@@ -7,6 +7,7 @@ import { playLuting, stopPlayback } from '../lib/player'
 import { useActivePlayback } from '../lib/usePlayback'
 import { Timeline } from './Timeline'
 import type { Lane, TrimUI } from './Timeline'
+import { ScoreView } from './ScoreView'
 import {
   Play,
   Square,
@@ -20,6 +21,7 @@ import {
   TriangleAlert,
   UnfoldHorizontal,
   Scissors,
+  FileMusic,
 } from 'lucide-react'
 
 interface Props {
@@ -36,6 +38,7 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
   const [optCopied, setOptCopied] = useState(false)
   const [copiedPart, setCopiedPart] = useState<number | null>(null)
   const [trimSel, setTrimSel] = useState<{ start: number | null; end: number | null } | null>(null)
+  const [scoreOpen, setScoreOpen] = useState(false)
   const activeId = useActivePlayback()
   const playing = activeId === 'main'
   const optPlaying = activeId === 'optimized'
@@ -155,6 +158,15 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
             Unoptimize
           </button>
           <button
+            className="btn"
+            data-tip="Engraved score of the whole song (read-only)"
+            onClick={() => setScoreOpen(true)}
+            disabled={!luting}
+          >
+            <FileMusic size={14} />
+            Score
+          </button>
+          <button
             className={`btn ${trimSel ? 'active-btn' : ''}`}
             data-tip="Trim the song: click the timeline where it should start, then where it should end"
             onClick={() => setTrimSel(trimSel ? null : { start: null, end: null })}
@@ -223,6 +235,8 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
           <span className="trim-note">notes overlapping a cut are clipped; voices are rewritten as plain notes · Esc cancels</span>
         </div>
       )}
+
+      <ScoreView open={scoreOpen} onClose={() => setScoreOpen(false)} parsed={parsed} lanes={lanes} />
 
       <Timeline
         luting={luting}

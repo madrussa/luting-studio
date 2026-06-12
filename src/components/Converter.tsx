@@ -4,6 +4,7 @@ import { convertMidi, MAX_CONVERT_VOICES, DEFAULT_CONVERT_VOICES } from "../lib/
 import type { ConvertResult } from "../lib/convert";
 import { convertAudio } from "../lib/pitch";
 import { INSTRUMENTS, importLuting } from "../lib/luting";
+import { unoptimizeLuting } from "../lib/optimize";
 import { FileMusic, Loader2, Import } from "lucide-react";
 
 interface Props {
@@ -18,16 +19,25 @@ export function Converter({ onImport }: Props) {
   const [audioInstrument, setAudioInstrument] = useState("l");
   const [dragOver, setDragOver] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const [unoptimize, setUnoptimize] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const handlePaste = () => {
     if (!pasteText.trim()) return;
     setError(null);
-    const result = importLuting(pasteText);
+    let text = pasteText;
+    const extraWarnings: string[] = [];
+    if (unoptimize) {
+      const expanded = unoptimizeLuting(text);
+      text = expanded.output;
+      // "no macros" chatter isn't useful on import; keep real warnings only
+      extraWarnings.push(...expanded.warnings.filter((w) => !w.startsWith("No macros")));
+    }
+    const result = importLuting(text);
     onImport({
       bpm: result.bpm,
       voices: result.voices.map((v) => ({ ...v, noteCount: 0 })),
-      warnings: result.warnings,
+      warnings: [...result.warnings, ...extraWarnings],
     });
     if (result.voices.length > 0) setPasteText("");
   };
@@ -116,6 +126,13 @@ export function Converter({ onImport }: Props) {
           Import
         </button>
       </div>
+      <label
+        className="convert-check"
+        data-tip="Expand macros to plain notes on import — unlocks the visual editors. Untick to keep the luting exactly as pasted."
+      >
+        <input type="checkbox" checked={unoptimize} onChange={(e) => setUnoptimize(e.target.checked)} />
+        Unoptimize on import (expand macros)
+      </label>
 
       <div className="convert-options">
         <label>

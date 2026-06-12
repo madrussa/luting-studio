@@ -287,6 +287,39 @@ body {
   color: var(--accent);
 }
 
+/* ---- score (VexFlow) ---- */
+.modal-score {
+  width: min(960px, 96vw);
+}
+.score-paper {
+  background: #fbfaf6;
+  border-radius: 10px;
+  padding: 14px 10px;
+  overflow-x: auto;
+}
+.score-section {
+  margin-bottom: 10px;
+}
+.score-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2a2440;
+  padding: 4px 8px;
+}
+.score-note {
+  font-size: 12px;
+  color: #6b6584;
+  padding: 2px 8px 8px;
+  font-style: italic;
+}
+.score-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
 /* ---- credits ---- */
 .credits-section {
   display: flex;
@@ -413,6 +446,18 @@ body {
 }
 .convert-options input[type='number'] {
   width: 64px;
+}
+.convert-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  width: fit-content;
+}
+.convert-check input {
+  accent-color: var(--accent);
 }
 .convert-note {
   font-size: 12px;
@@ -726,6 +771,14 @@ body {
   background: var(--bg-soft);
   border-right: 1px solid var(--border);
   flex-shrink: 0;
+}
+.staff-gutter-label {
+  position: absolute;
+  right: 6px;
+  font-size: 8.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 .roll-row-label {
   font-size: 8.5px;

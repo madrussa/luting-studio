@@ -224,7 +224,7 @@ export interface ImportResult {
  * land mid-token (even inside a chord) — so continuations are concatenated
  * verbatim after their header is removed.
  */
-function reassembleMultilute(input: string, warnings: string[]): string {
+export function reassembleMultilute(input: string, warnings: string[]): string {
   // drop the VS Code extension's framing comments around each part
   const src = input.replace(/\/\/\s*(Multilute \d+:|Your Multilutes Sir:)\s*/gi, '')
   const starts: number[] = []

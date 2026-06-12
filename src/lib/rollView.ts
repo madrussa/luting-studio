@@ -4,18 +4,39 @@
 
 import { useSyncExternalStore } from 'react'
 
+export type RollMode = 'grid' | 'staff'
+
 export interface RollView {
   pxPerUnit: number
   scrollUnits: number
+  /** grid = piano roll rows; staff = grand-staff notation */
+  mode: RollMode
 }
 
-let view: RollView = { pxPerUnit: 10, scrollUnits: 0 }
+const MODE_KEY = 'luting-roll-mode'
+
+const savedMode = ((): RollMode => {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'staff' ? 'staff' : 'grid'
+  } catch {
+    return 'grid'
+  }
+})()
+
+let view: RollView = { pxPerUnit: 10, scrollUnits: 0, mode: savedMode }
 const subs = new Set<() => void>()
 
 export const getRollView = (): RollView => view
 
 export function setRollView(patch: Partial<RollView>) {
   view = { ...view, ...patch }
+  if (patch.mode) {
+    try {
+      localStorage.setItem(MODE_KEY, patch.mode)
+    } catch {
+      // preference just won't persist
+    }
+  }
   for (const cb of [...subs]) cb()
 }
 

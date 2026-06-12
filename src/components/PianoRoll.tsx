@@ -1,11 +1,13 @@
-// Visual note editor for one voice: a piano roll (or drum grid for the
-// Drumkit). Rows are pitches/drum sounds, columns are t1 grid units. Click an
-// empty cell to add a note at the selected length, click a note to remove it.
-// Every edit is serialized straight back into the voice's luting text.
-//
-// Zoom and horizontal scroll are shared across all open editors (rollView),
-// so multiple voices stay column-aligned. The canvas is windowed: only the
-// visible slice is drawn, so long tracks at any zoom stay cheap.
+// Visual note editor for one voice, with two views:
+//  - grid: a piano roll (rows are semitones; drum voices get one row per
+//    drum sound)
+//  - staff: a grand staff (treble + bass) for people who read notation —
+//    click a line/space to add a note, shift+click for a flat
+// Click an empty spot to add a note at the selected length, click a note to
+// remove it. Every edit is serialized straight back to the voice's luting
+// text. Zoom and horizontal scroll are shared across all open editors
+// (rollView) so multiple voices stay column-aligned. The canvas is windowed:
+// only the visible slice is drawn, so long tracks at any zoom stay cheap.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
@@ -17,7 +19,7 @@ import { playLuting, getPlaybackInfo } from '../lib/player'
 import { useActivePlayback } from '../lib/usePlayback'
 import { useRollView, setRollView, getRollView, clampZoom } from '../lib/rollView'
 import { instrumentColor } from './Timeline'
-import { Minus, Plus, TriangleAlert } from 'lucide-react'
+import { Minus, Plus, TriangleAlert, LayoutGrid, Music } from 'lucide-react'
 
 const MIDI_MAX = 107 // b7
 const MIDI_MIN = 24 // c1
@@ -26,6 +28,26 @@ const DRUM_KEYS = Object.keys(DRUM_SOUNDS)
 const NOTE_LENGTHS = [1, 2, 3, 4, 6, 8, 12, 16]
 const GUTTER = 52
 const RULER = 16
+
+// ---- staff geometry: diatonic steps from C1 (idx 0) to B7 (idx 48) --------
+const STEP = 6
+const STAFF_PAD = 18
+const DIATONIC_MAX = 48
+const STAFF_H = STAFF_PAD * 2 + DIATONIC_MAX * STEP
+const LETTERS = 'cdefgab'
+const LETTER_SEMI: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }
+const TREBLE_LINES = [23, 25, 27, 29, 31] // E4 G4 B4 D5 F5
+const BASS_LINES = [11, 13, 15, 17, 19] // G2 B2 D3 F3 A3
+
+const staffIndex = (midi: number): { idx: number; flat: boolean } => {
+  const p = midiToPitch(midi)
+  return { idx: (p.octave - 1) * 7 + LETTERS.indexOf(p.letter[0]), flat: p.letter.includes("'") }
+}
+const midiForIdx = (idx: number, flat: boolean): number => {
+  const octave = Math.floor(idx / 7) + 1
+  const letter = LETTERS[idx % 7]
+  return (octave + 1) * 12 + LETTER_SEMI[letter] - (flat ? 1 : 0)
+}
 
 interface Props {
   notes: ScheduledNote[]
@@ -55,11 +77,14 @@ export function PianoRoll({
   onChangeBody,
 }: Props) {
   const isDrum = instrument === 'd'
+  const view = useRollView()
+  const { pxPerUnit, scrollUnits } = view
+  const mode = isDrum ? 'grid' : view.mode
+
   const rows = isDrum ? DRUM_KEYS.length : MELODIC_ROWS
   const rowH = isDrum ? 16 : 10
-  const H = rows * rowH
+  const H = mode === 'staff' ? STAFF_H : rows * rowH
 
-  const { pxPerUnit, scrollUnits } = useRollView()
   const [noteLen, setNoteLen] = useState(4)
   const [flash, setFlash] = useState<string | null>(null)
   const [viewW, setViewW] = useState(600)
@@ -69,7 +94,7 @@ export function PianoRoll({
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const rulerRef = useRef<HTMLDivElement>(null)
   const playheadRef = useRef<HTMLDivElement>(null)
-  const hover = useRef<{ u: number; row: number } | null>(null)
+  const hover = useRef<{ u: number; pos: number; flat: boolean } | null>(null)
   const rafRef = useRef(0)
   const drawRef = useRef<() => void>(() => {})
   const scrubbing = useRef(false)
@@ -88,6 +113,21 @@ export function PianoRoll({
   )
 
   const rowForNote = (n: RollNote) => (isDrum ? DRUM_KEYS.indexOf(n.drum!) : MIDI_MAX - (n.midi ?? 60))
+  const yForIdx = (idx: number) => STAFF_PAD + (DIATONIC_MAX - idx) * STEP
+
+  /** geometry of a note for overlays (spotlight, playback flash), per mode */
+  const noteRect = (n: RollNote): { x: number; y: number; w: number; h: number } | null => {
+    const x = n.start * pxPerUnit
+    const w = Math.max(2, n.dur * pxPerUnit - 1)
+    if (mode === 'staff') {
+      if (n.midi === undefined) return null
+      const y = yForIdx(staffIndex(n.midi).idx)
+      return { x: x - 2, y: y - 5, w: Math.max(w, 12), h: 10 }
+    }
+    const r = rowForNote(n)
+    if (r < 0) return null
+    return { x, y: r * rowH + 1, w, h: rowH - 2 }
+  }
 
   // track visible width
   useEffect(() => {
@@ -99,17 +139,155 @@ export function PianoRoll({
     return () => ro.disconnect()
   }, [])
 
-  // scroll vertically to the content (or middle C) when opened
+  // scroll vertically to the content (or middle C) when opened in grid mode
   useEffect(() => {
     const el = scrollRef.current
-    if (!el) return
+    if (!el || mode === 'staff') return
     const first = derived.notes[0]
     const row = first ? rowForNote(first) : isDrum ? 0 : MIDI_MAX - 60
     el.scrollTop = Math.max(0, row * rowH - el.clientHeight / 2)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [mode])
 
-  // windowed canvas draw
+  // ---- drawing -------------------------------------------------------------
+
+  const drawStaff = (ctx: CanvasRenderingContext2D, offset: number, cw: number) => {
+    const color = instrumentColor(instrument)
+    // beat/bar lines behind everything
+    const beatStep = pxPerUnit >= 1.5 ? 4 : 16
+    const uFrom = Math.floor(offset / pxPerUnit / beatStep) * beatStep
+    const uTo = Math.min(totalUnits, Math.ceil((offset + cw) / pxPerUnit))
+    for (let u = uFrom; u <= uTo; u += beatStep) {
+      ctx.fillStyle = u % 16 === 0 ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.03)'
+      ctx.fillRect(u * pxPerUnit, yForIdx(31), 1, yForIdx(11) - yForIdx(31))
+    }
+    // staff lines
+    ctx.fillStyle = 'rgba(255,255,255,0.45)'
+    for (const li of [...TREBLE_LINES, ...BASS_LINES]) {
+      ctx.fillRect(offset, yForIdx(li) - 0.5, cw, 1)
+    }
+    // clefs pinned to the left edge of the visible window
+    ctx.fillStyle = 'rgba(20,18,31,0.85)'
+    ctx.fillRect(offset, yForIdx(32), 24, yForIdx(22) - yForIdx(32))
+    ctx.fillRect(offset, yForIdx(20), 24, yForIdx(10) - yForIdx(20))
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'
+    ctx.font = '34px serif'
+    ctx.fillText('\u{1D11E}', offset + 2, yForIdx(25) + 12) // G clef on G4
+    ctx.font = '26px serif'
+    ctx.fillText('\u{1D122}', offset + 3, yForIdx(17) + 8) // F clef on F3
+
+    const drawLedgers = (idx: number, x: number) => {
+      ctx.fillStyle = 'rgba(255,255,255,0.4)'
+      const line = (p: number) => ctx.fillRect(x - 7, yForIdx(p) - 0.5, 14, 1)
+      if (idx >= 21 && idx <= 22) line(21) // middle C
+      for (let p = 33; p <= idx; p += 2) line(p)
+      for (let p = 9; p >= idx; p -= 2) line(p)
+    }
+
+    for (const n of derived.notes) {
+      if (n.midi === undefined) continue
+      const x = n.start * pxPerUnit
+      const w = Math.max(2, n.dur * pxPerUnit - 1)
+      if (x + w < offset || x > offset + cw) continue
+      const { idx, flat } = staffIndex(n.midi)
+      const y = yForIdx(idx)
+      // faint duration bar keeps the piano-roll affordance
+      ctx.fillStyle = color
+      ctx.globalAlpha = 0.22
+      ctx.fillRect(x, y - 2, w, 4)
+      ctx.globalAlpha = 1
+      drawLedgers(idx, x + 4)
+      // head: hollow for half notes and longer (>= 8 units at 4/beat)
+      const hollow = n.dur >= 8
+      ctx.beginPath()
+      ctx.ellipse(x + 4, y, 4.4, 3.2, -0.25, 0, Math.PI * 2)
+      if (hollow) {
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1.6
+        ctx.stroke()
+      } else {
+        ctx.fillStyle = color
+        ctx.fill()
+      }
+      // stem (none on whole notes)
+      if (n.dur < 16) {
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1.2
+        ctx.beginPath()
+        const stemUp = idx < (idx >= 21 ? 27 : 15)
+        if (stemUp) {
+          ctx.moveTo(x + 8.2, y - 1)
+          ctx.lineTo(x + 8.2, y - 19)
+        } else {
+          ctx.moveTo(x - 0.2, y + 1)
+          ctx.lineTo(x - 0.2, y + 19)
+        }
+        ctx.stroke()
+      }
+      if (flat) {
+        ctx.fillStyle = color
+        ctx.font = 'bold 11px serif'
+        ctx.fillText('♭', x - 7, y + 3.5)
+      }
+    }
+
+    // hover ghost
+    if (hover.current) {
+      const { u, pos, flat } = hover.current
+      const gx = u * pxPerUnit
+      const gy = yForIdx(pos)
+      ctx.globalAlpha = 0.5
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 1.3
+      ctx.beginPath()
+      ctx.ellipse(gx + 4, gy, 4.4, 3.2, -0.25, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.fillStyle = 'rgba(255,255,255,0.25)'
+      ctx.fillRect(gx, gy - 2, Math.max(2, noteLen * pxPerUnit - 1), 4)
+      if (flat) {
+        ctx.fillStyle = '#ffffff'
+        ctx.font = 'bold 11px serif'
+        ctx.fillText('♭', gx - 7, gy + 3.5)
+      }
+      ctx.globalAlpha = 1
+    }
+  }
+
+  const drawGrid = (ctx: CanvasRenderingContext2D, offset: number, cw: number) => {
+    for (let r = 0; r < rows; r++) {
+      const midi = MIDI_MAX - r
+      const shade = isDrum ? r % 2 === 0 : Math.floor(midi / 12) % 2 === 0
+      ctx.fillStyle = shade ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.015)'
+      ctx.fillRect(offset, r * rowH, cw, rowH)
+      if (!isDrum && midi % 12 === 0) {
+        ctx.fillStyle = 'rgba(90,209,179,0.10)'
+        ctx.fillRect(offset, r * rowH, cw, rowH)
+      }
+    }
+    const beatStep = pxPerUnit >= 1.5 ? 4 : 16
+    const uFrom = Math.floor(offset / pxPerUnit / beatStep) * beatStep
+    const uTo = Math.min(totalUnits, Math.ceil((offset + cw) / pxPerUnit))
+    for (let u = uFrom; u <= uTo; u += beatStep) {
+      ctx.fillStyle = u % 16 === 0 ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.06)'
+      ctx.fillRect(u * pxPerUnit, 0, 1, H)
+    }
+    const color = instrumentColor(instrument)
+    ctx.fillStyle = color
+    for (const n of derived.notes) {
+      const x = n.start * pxPerUnit
+      const w = Math.max(2, n.dur * pxPerUnit - 1)
+      if (x + w < offset || x > offset + cw) continue
+      const r = rowForNote(n)
+      if (r < 0) continue
+      ctx.fillRect(x + 0.5, r * rowH + 1, w, rowH - 2)
+    }
+    if (hover.current) {
+      const { u, pos } = hover.current
+      ctx.fillStyle = 'rgba(255,255,255,0.25)'
+      ctx.fillRect(u * pxPerUnit + 0.5, pos * rowH + 1, Math.max(2, noteLen * pxPerUnit - 1), rowH - 2)
+    }
+  }
+
   const draw = () => {
     const el = scrollRef.current
     const canvas = canvasRef.current
@@ -126,87 +304,37 @@ export function PianoRoll({
     ctx.clearRect(0, 0, cw, H)
     ctx.translate(-offset, 0)
 
-    for (let r = 0; r < rows; r++) {
-      const midi = MIDI_MAX - r
-      const shade = isDrum ? r % 2 === 0 : Math.floor(midi / 12) % 2 === 0
-      ctx.fillStyle = shade ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.015)'
-      ctx.fillRect(offset, r * rowH, cw, rowH)
-      if (!isDrum && midi % 12 === 0) {
-        ctx.fillStyle = 'rgba(90,209,179,0.10)'
-        ctx.fillRect(offset, r * rowH, cw, rowH)
-      }
-    }
-    // vertical grid: beats (4 units) and bars (16 units); thin out when zoomed far out
-    const beatStep = pxPerUnit >= 1.5 ? 4 : 16
-    const uFrom = Math.floor(offset / pxPerUnit / beatStep) * beatStep
-    const uTo = Math.min(totalUnits, Math.ceil((offset + cw) / pxPerUnit))
-    for (let u = uFrom; u <= uTo; u += beatStep) {
-      ctx.fillStyle = u % 16 === 0 ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.06)'
-      ctx.fillRect(u * pxPerUnit, 0, 1, H)
-    }
-    // notes (culled to the window)
-    const color = instrumentColor(instrument)
-    ctx.fillStyle = color
-    for (const n of derived.notes) {
-      const x = n.start * pxPerUnit
-      const w = Math.max(2, n.dur * pxPerUnit - 1)
-      if (x + w < offset || x > offset + cw) continue
-      const r = rowForNote(n)
-      if (r < 0) continue
-      ctx.fillRect(x + 0.5, r * rowH + 1, w, rowH - 2)
-    }
-    // caret spotlight: crosshair bands + white-hot note(s) under the cursor
+    if (mode === 'staff') drawStaff(ctx, offset, cw)
+    else drawGrid(ctx, offset, cw)
+
+    // caret spotlight: crosshair band + white-hot note(s) under the cursor
     if (highlight) {
-      const picked: RollNote[] = []
+      const picked = []
       for (let k = highlight.from; k < highlight.from + highlight.count && k < derived.notes.length; k++) {
-        if (rowForNote(derived.notes[k]) >= 0) picked.push(derived.notes[k])
+        const r = noteRect(derived.notes[k])
+        if (r) picked.push(r)
       }
-      // row + column background bands so the spot stands out at any zoom
       ctx.fillStyle = 'rgba(255,255,255,0.08)'
-      for (const n of picked) {
-        ctx.fillRect(n.start * pxPerUnit, 0, Math.max(2, n.dur * pxPerUnit), H)
-        ctx.fillRect(offset, rowForNote(n) * rowH, cw, rowH)
+      for (const r of picked) {
+        ctx.fillRect(r.x, 0, r.w, H)
+        if (mode === 'grid') ctx.fillRect(offset, r.y, cw, r.h)
       }
-      // the note itself: white fill with a colored glow and ring
-      ctx.shadowColor = color
+      ctx.shadowColor = instrumentColor(instrument)
       ctx.shadowBlur = 10
       ctx.strokeStyle = '#ffffff'
       ctx.lineWidth = 1.5
-      for (const n of picked) {
-        const x = n.start * pxPerUnit
-        const y = rowForNote(n) * rowH
-        const w = Math.max(2, n.dur * pxPerUnit - 1)
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect(x + 0.5, y + 1, w, rowH - 2)
-        ctx.strokeRect(x - 1, y - 0.5, w + 2.5, rowH + 1)
+      for (const r of picked) {
+        if (mode === 'grid') {
+          ctx.fillStyle = '#ffffff'
+          ctx.fillRect(r.x + 0.5, r.y, r.w, r.h)
+        }
+        ctx.strokeRect(r.x - 1, r.y - 0.5, r.w + 2.5, r.h + 1)
       }
       ctx.shadowBlur = 0
-    }
-    if (hover.current) {
-      const { u, row } = hover.current
-      ctx.fillStyle = 'rgba(255,255,255,0.25)'
-      ctx.fillRect(u * pxPerUnit + 0.5, row * rowH + 1, Math.max(2, noteLen * pxPerUnit - 1), rowH - 2)
     }
   }
   drawRef.current = draw
   useEffect(draw)
-
-  // bring the caret-spotlighted note into view
-  useEffect(() => {
-    if (!highlight) return
-    const n = derived.notes[highlight.from]
-    const el = scrollRef.current
-    if (!n || !el) return
-    const x = n.start * pxPerUnit
-    if (x < el.scrollLeft + 20 || x > el.scrollLeft + viewW - 40) {
-      setRollView({ scrollUnits: Math.max(0, n.start - viewW / pxPerUnit / 3) })
-    }
-    const rTop = rowForNote(n) * rowH
-    if (rTop < el.scrollTop + RULER + 4 || rTop > el.scrollTop + el.clientHeight - 30) {
-      el.scrollTop = Math.max(0, rTop - el.clientHeight / 2)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlight?.from, highlight?.count])
 
   // follow shared horizontal scroll
   useEffect(() => {
@@ -234,21 +362,21 @@ export function PianoRoll({
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
 
-  // Ctrl+wheel zooms, anchored at the cursor. Needs a non-passive listener so
-  // the browser's page zoom can be suppressed.
+  // Ctrl/Cmd+wheel zooms, anchored at the cursor. Needs a non-passive
+  // listener so the browser's page zoom can be suppressed.
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
       e.preventDefault()
-      const view = getRollView()
+      const v = getRollView()
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
-      const newPx = clampZoom(view.pxPerUnit * factor)
-      if (newPx === view.pxPerUnit) return
-      const body = bodyRef.current
-      if (!body) return
-      const cursorUnits = (e.clientX - body.getBoundingClientRect().left) / view.pxPerUnit
+      const newPx = clampZoom(v.pxPerUnit * factor)
+      if (newPx === v.pxPerUnit) return
+      const bodyEl = bodyRef.current
+      if (!bodyEl) return
+      const cursorUnits = (e.clientX - bodyEl.getBoundingClientRect().left) / v.pxPerUnit
       const viewportX = e.clientX - el.getBoundingClientRect().left - GUTTER
       setRollView({ pxPerUnit: newPx, scrollUnits: Math.max(0, cursorUnits - viewportX / newPx) })
     }
@@ -256,9 +384,7 @@ export function PianoRoll({
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  // Playhead line + note-flash overlay, tracking solo or main playback.
-  // Sounding notes glow in the instrument's color with a bright "pop" at
-  // their onset that decays over ~250ms.
+  // playhead line + note-flash overlay, tracking solo or main playback
   useEffect(() => {
     const ph = playheadRef.current
     const overlay = overlayRef.current
@@ -283,8 +409,6 @@ export function PianoRoll({
       if (!info) return
       const posU = info.position / unit
       ph.style.transform = `translateX(${posU * pxPerUnit}px)`
-
-      // window the overlay to the visible slice, like the base canvas
       const offset = el.scrollLeft
       const cw = Math.min(viewW + 40, Math.max(100, Math.ceil(W - offset)))
       const dpr = window.devicePixelRatio || 1
@@ -295,21 +419,18 @@ export function PianoRoll({
       octx.setTransform(dpr, 0, 0, dpr, 0, 0)
       octx.clearRect(0, 0, cw, H)
       octx.translate(-offset, 0)
-
       for (const n of derived.notes) {
         if (posU < n.start || posU >= n.start + n.dur) continue
-        const x = n.start * pxPerUnit
-        const w = Math.max(2, n.dur * pxPerUnit - 1)
-        if (x + w < offset || x > offset + cw) continue
-        const r = rowForNote(n)
-        if (r < 0) continue
+        const r = noteRect(n)
+        if (!r) continue
+        if (r.x + r.w < offset || r.x > offset + cw) continue
         const ageSec = (posU - n.start) * unit
-        const flash = Math.exp(-ageSec * 9)
-        const pad = flash * 2.5
+        const fl = Math.exp(-ageSec * 9)
+        const pad = fl * 2.5
         octx.shadowColor = color
-        octx.shadowBlur = 6 + flash * 16
-        octx.fillStyle = `rgba(255,255,255,${(0.55 + 0.45 * flash).toFixed(3)})`
-        octx.fillRect(x - pad, r * rowH + 1 - pad, w + pad * 2, rowH - 2 + pad * 2)
+        octx.shadowBlur = 6 + fl * 16
+        octx.fillStyle = `rgba(255,255,255,${(0.55 + 0.45 * fl).toFixed(3)})`
+        octx.fillRect(r.x - pad, r.y - pad, r.w + pad * 2, r.h + pad * 2)
       }
       octx.shadowBlur = 0
       raf = requestAnimationFrame(tick)
@@ -319,7 +440,27 @@ export function PianoRoll({
       cancelAnimationFrame(raf)
       clear()
     }
-  }, [tracking, pxPerUnit, bpm, derived, viewW, W, H, rowH, instrument, isDrum])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracking, pxPerUnit, bpm, derived, viewW, W, H, rowH, instrument, isDrum, mode])
+
+  // bring the caret-spotlighted note into view
+  useEffect(() => {
+    if (!highlight) return
+    const n = derived.notes[highlight.from]
+    const el = scrollRef.current
+    if (!n || !el) return
+    const x = n.start * pxPerUnit
+    if (x < el.scrollLeft + 20 || x > el.scrollLeft + viewW - 40) {
+      setRollView({ scrollUnits: Math.max(0, n.start - viewW / pxPerUnit / 3) })
+    }
+    if (mode === 'grid') {
+      const rTop = rowForNote(n) * rowH
+      if (rTop < el.scrollTop + RULER + 4 || rTop > el.scrollTop + el.clientHeight - 30) {
+        el.scrollTop = Math.max(0, rTop - el.clientHeight / 2)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight?.from, highlight?.count])
 
   // ruler scrubbing: click/drag the bar numbers to solo-play from there
   const scrubTo = (clientX: number) => {
@@ -338,11 +479,16 @@ export function PianoRoll({
   }
   const fit = () => setRollView({ pxPerUnit: clampZoom(viewW / totalUnits), scrollUnits: 0 })
 
+  /** map a pointer position to (time unit, row or staff index) */
   const locate = (e: ReactMouseEvent) => {
     const rect = bodyRef.current!.getBoundingClientRect()
-    const u = Math.floor((e.clientX - rect.left) / pxPerUnit)
-    const row = Math.floor((e.clientY - rect.top) / rowH)
-    return { u: Math.max(0, u), row: Math.min(rows - 1, Math.max(0, row)) }
+    const u = Math.max(0, Math.floor((e.clientX - rect.left) / pxPerUnit))
+    const y = e.clientY - rect.top
+    if (mode === 'staff') {
+      const idx = Math.max(0, Math.min(DIATONIC_MAX, Math.round((STAFF_PAD + DIATONIC_MAX * STEP - y) / STEP)))
+      return { u, pos: idx }
+    }
+    return { u, pos: Math.min(rows - 1, Math.max(0, Math.floor(y / rowH))) }
   }
 
   const commit = (notes: RollNote[]) => {
@@ -365,15 +511,29 @@ export function PianoRoll({
   }
 
   const onClick = (e: ReactMouseEvent) => {
-    const { u, row } = locate(e)
-    const hit = derived.notes.find((n) => u >= n.start && u < n.start + n.dur && rowForNote(n) === row)
+    const { u, pos } = locate(e)
+    const hit = derived.notes.find((n) => {
+      if (u < n.start || u >= n.start + n.dur) return false
+      if (mode === 'staff') return n.midi !== undefined && staffIndex(n.midi).idx === pos
+      return rowForNote(n) === pos
+    })
     if (hit) {
       commit(derived.notes.filter((n) => n !== hit))
       return
     }
-    const note: RollNote = isDrum
-      ? { start: u, dur: 1, drum: DRUM_KEYS[row] }
-      : { start: u, dur: noteLen, midi: MIDI_MAX - row }
+    let note: RollNote
+    if (isDrum) {
+      note = { start: u, dur: 1, drum: DRUM_KEYS[pos] }
+    } else if (mode === 'staff') {
+      const midi = midiForIdx(pos, e.shiftKey)
+      if (midi < MIDI_MIN || midi > MIDI_MAX) {
+        warn('That position is outside the playable o1–o7 range.')
+        return
+      }
+      note = { start: u, dur: noteLen, midi }
+    } else {
+      note = { start: u, dur: noteLen, midi: MIDI_MAX - pos }
+    }
     const clashing = derived.notes.filter((m) => note.start < m.start + m.dur && m.start < note.start + note.dur)
     if (clashing.length > 0) {
       if (isDrum) {
@@ -394,9 +554,10 @@ export function PianoRoll({
   }
 
   const onMove = (e: ReactMouseEvent) => {
-    const pos = locate(e)
-    if (hover.current?.u !== pos.u || hover.current?.row !== pos.row) {
-      hover.current = pos
+    const { u, pos } = locate(e)
+    const flat = mode === 'staff' && e.shiftKey
+    if (hover.current?.u !== u || hover.current?.pos !== pos || hover.current?.flat !== flat) {
+      hover.current = { u, pos, flat }
       cancelAnimationFrame(rafRef.current)
       rafRef.current = requestAnimationFrame(() => drawRef.current())
     }
@@ -423,6 +584,26 @@ export function PianoRoll({
   return (
     <div className="roll">
       <div className="roll-toolbar">
+        {!isDrum && (
+          <span className="roll-tool">
+            <button
+              className={`icon-btn ${mode === 'grid' ? 'active' : ''}`}
+              aria-label="Grid view"
+              data-tip="Piano-roll grid"
+              onClick={() => setRollView({ mode: 'grid' })}
+            >
+              <LayoutGrid size={13} />
+            </button>
+            <button
+              className={`icon-btn ${mode === 'staff' ? 'active' : ''}`}
+              aria-label="Staff view"
+              data-tip="Staff notation (grand staff)"
+              onClick={() => setRollView({ mode: 'staff' })}
+            >
+              <Music size={13} />
+            </button>
+          </span>
+        )}
         <span className="roll-tool">
           Note length
           <select value={noteLen} onChange={(e) => setNoteLen(parseInt(e.target.value, 10))} disabled={isDrum}>
@@ -445,7 +626,11 @@ export function PianoRoll({
             Fit
           </button>
         </span>
-        <span className="roll-hint">click empty = add · click note = remove · ctrl/cmd+wheel = zoom · 4 units = 1 beat · zoom &amp; scroll are shared across editors</span>
+        <span className="roll-hint">
+          click empty = add · click note = remove
+          {mode === 'staff' ? ' · shift+click = flat' : ''} · ctrl/cmd+wheel = zoom · 4 units = 1 beat ·
+          zoom &amp; scroll are shared across editors
+        </span>
       </div>
       {hasMacros && (
         <div className="roll-note">
@@ -488,12 +673,26 @@ export function PianoRoll({
             </div>
           </div>
           <div style={{ display: 'flex' }}>
-            <div className="roll-gutter" style={{ width: GUTTER }}>
-              {Array.from({ length: rows }, (_, r) => (
-                <div key={r} className="roll-row-label" style={{ height: rowH }}>
-                  {rowLabel(r)}
-                </div>
-              ))}
+            <div className="roll-gutter" style={{ width: GUTTER, position: 'relative' }}>
+              {mode === 'staff' ? (
+                <>
+                  <span className="staff-gutter-label" style={{ top: yForIdx(27) - 8 }}>
+                    treble
+                  </span>
+                  <span className="staff-gutter-label" style={{ top: yForIdx(21) - 8 }}>
+                    c4
+                  </span>
+                  <span className="staff-gutter-label" style={{ top: yForIdx(15) - 8 }}>
+                    bass
+                  </span>
+                </>
+              ) : (
+                Array.from({ length: rows }, (_, r) => (
+                  <div key={r} className="roll-row-label" style={{ height: rowH }}>
+                    {rowLabel(r)}
+                  </div>
+                ))
+              )}
             </div>
             <div
               ref={bodyRef}

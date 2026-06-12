@@ -7,7 +7,7 @@
 // cross a voice boundary. A final self-check parses both versions and compares
 // the full note schedules before accepting the result.
 
-import { parseLuting, expandMacros } from './luting'
+import { parseLuting, expandMacros, reassembleMultilute } from './luting'
 import type { ParseResult } from './luting'
 
 export interface OptimizeResult {
@@ -270,9 +270,11 @@ export function toMultilute(luting: string): string[] {
  * The reverse of optimize: expand every macro back to plain notes (comments
  * and whitespace are stripped too). Unlocks visual editing on macro'd voices.
  */
-export function unoptimizeLuting(input: string): OptimizeResult {
+export function unoptimizeLuting(rawInput: string): OptimizeResult {
   const warnings: string[] = []
-  const before = input.length
+  const before = rawInput.length
+  // pasted multilutes must be joined before anything else can parse them
+  const input = reassembleMultilute(rawInput, warnings)
 
   let src = input
     .split('//')
@@ -303,9 +305,11 @@ export function unoptimizeLuting(input: string): OptimizeResult {
   return { output, before, after: output.length, macrosUsed: 0, warnings }
 }
 
-export function optimizeLuting(input: string): OptimizeResult {
+export function optimizeLuting(rawInput: string): OptimizeResult {
   const warnings: string[] = []
-  const before = input.length
+  const before = rawInput.length
+  // pasted multilutes must be joined before anything else can parse them
+  const input = reassembleMultilute(rawInput, warnings)
   const unchanged = (extra: string): OptimizeResult => ({
     output: input,
     before,

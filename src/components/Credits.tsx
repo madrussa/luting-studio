@@ -33,6 +33,11 @@ const SOFTWARE_CREDITS: Credit[] = [
     url: 'https://github.com/Tonejs/Midi',
   },
   {
+    name: 'VexFlow',
+    what: 'Music engraving for the Score view — staves, beams, ties, and the percussion staff.',
+    url: 'https://vexflow.com/',
+  },
+  {
     name: 'Prism.js',
     what: 'Syntax highlighting engine running the migrated luting grammar.',
     url: 'https://prismjs.com/',

@@ -42,6 +42,7 @@ export function Help({ open, onClose }: Props) {
           <div className="help-title">The note editor (piano roll)</div>
           <ul className="help-list">
             <li><strong>Click an empty cell</strong> to add a note at the selected length; <strong>click a note</strong> to remove it. Stack notes in the same column to build chords. Drumkit voices show one row per drum sound.</li>
+            <li>If you read music, switch the editor to <strong>staff view</strong> (the toolbar toggle) — a grand staff with clefs, ledger lines and accidentals. Click a line or space to add a note; <Key k="Shift" />+click writes it as a <strong>flat</strong>. The view choice is shared by all editors.</li>
             <li><Key k="Ctrl" />/<Key k="⌘" /> + <strong>mouse wheel</strong> (or trackpad pinch) zooms, anchored at the cursor. Zoom and horizontal scroll are <strong>shared across all open editors</strong> so voices stay aligned; <strong>Fit</strong> shows the whole track.</li>
             <li>Drag the <strong>bar-number ruler</strong> to scrub solo playback; the playhead sweeps the grid and notes flash as they sound.</li>
             <li>With the editor open, <strong>placing the caret on a note in the syntax box spotlights it in the grid</strong> (and scrolls to it) — great for finding your place in long voices.</li>
