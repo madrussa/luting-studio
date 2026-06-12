@@ -320,6 +320,35 @@ export interface PlayOptions {
   onEnded?: () => void
 }
 
+// ---- global volume --------------------------------------------------------
+
+const VOL_KEY = 'luting-volume'
+const BASE_GAIN = 0.5
+
+let masterVolume = (() => {
+  try {
+    const v = parseFloat(localStorage.getItem(VOL_KEY) ?? '')
+    return isNaN(v) ? 0.8 : Math.min(1, Math.max(0, v))
+  } catch {
+    return 0.8
+  }
+})()
+
+export const getMasterVolume = (): number => masterVolume
+
+/** 0..1; applies live to whatever is currently playing */
+export function setMasterVolume(v: number) {
+  masterVolume = Math.min(1, Math.max(0, v))
+  try {
+    localStorage.setItem(VOL_KEY, String(masterVolume))
+  } catch {
+    // preference just won't persist
+  }
+  if (active) {
+    active.master.gain.setTargetAtTime(BASE_GAIN * masterVolume, active.ctx.currentTime, 0.02)
+  }
+}
+
 let active: {
   ctx: AudioContext
   timer: number
@@ -328,6 +357,7 @@ let active: {
   t0: number
   startAt: number
   total: number
+  master: GainNode
 } | null = null
 const listeners = new Set<() => void>()
 
@@ -375,7 +405,7 @@ export function playLuting(text: string, opts: PlayOptions = {}): PlayHandle {
   const startAt = Math.max(0, Math.min(opts.startAt ?? 0, durationSec))
   const ctx = new AudioContext()
   const master = ctx.createGain()
-  master.gain.value = 0.5
+  master.gain.value = BASE_GAIN * masterVolume
   const comp = ctx.createDynamicsCompressor()
   master.connect(comp)
   comp.connect(ctx.destination)
@@ -422,7 +452,7 @@ export function playLuting(text: string, opts: PlayOptions = {}): PlayHandle {
     stopPlayback()
     opts.onEnded?.()
   }, (durationSec - startAt + 1.5) * 1000)
-  active = { ctx, timer, pump, id: opts.id ?? 'main', t0, startAt, total: durationSec }
+  active = { ctx, timer, pump, id: opts.id ?? 'main', t0, startAt, total: durationSec, master }
   notify()
   return { stop: stopPlayback, durationSec }
 }

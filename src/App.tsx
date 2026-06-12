@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { InstrumentPalette } from './components/InstrumentPalette'
 import { VoiceBoard } from './components/VoiceBoard'
 import { Converter } from './components/Converter'
@@ -6,8 +6,22 @@ import { OutputPanel } from './components/OutputPanel'
 import type { ConvertResult } from './lib/convert'
 import { importLuting, instrumentByCode, serializeVoiceBody } from './lib/luting'
 import { scheduledToRollNotes, notesToEvents, dominantVolume } from './lib/transform'
-import { stopPlayback, playLuting, getPlaybackInfo } from './lib/player'
-import { Music, Eye, EyeOff, Import, TriangleAlert, X, Library as LibraryIcon, Check, Heart, CircleHelp } from 'lucide-react'
+import { stopPlayback, playLuting, getPlaybackInfo, getMasterVolume, setMasterVolume } from './lib/player'
+import {
+  Music,
+  Eye,
+  EyeOff,
+  Import,
+  TriangleAlert,
+  X,
+  Library as LibraryIcon,
+  Check,
+  Heart,
+  CircleHelp,
+  Volume2,
+  Volume1,
+  VolumeX,
+} from 'lucide-react'
 import { Library } from './components/Library'
 import { Credits } from './components/Credits'
 import { Help } from './components/Help'
@@ -70,6 +84,21 @@ export default function App() {
   const [songName, setSongName] = useState(() => loadSaved()?.songName ?? '')
   const [currentSongId, setCurrentSongId] = useState<string | null>(() => loadSaved()?.currentSongId ?? null)
   const [justSaved, setJustSaved] = useState(false)
+  const [volume, setVolume] = useState(() => getMasterVolume())
+  const prevVolume = useRef(0.8)
+
+  const changeVolume = (v: number) => {
+    setVolume(v)
+    setMasterVolume(v)
+  }
+  const toggleMute = () => {
+    if (volume > 0) {
+      prevVolume.current = volume
+      changeVolume(0)
+    } else {
+      changeVolume(prevVolume.current || 0.8)
+    }
+  }
 
   // ESC stops whatever is playing and closes any dialog
   useEffect(() => {
@@ -241,6 +270,19 @@ export default function App() {
           {songName && <span className="song-name">{songName}</span>}
         </div>
         <div className="topbar-actions">
+          <div className="volume-control" data-tip="Volume for all sounds — click the icon to mute">
+            <button className="icon-btn" aria-label="Mute" onClick={toggleMute}>
+              {volume === 0 ? <VolumeX size={15} /> : volume < 0.5 ? <Volume1 size={15} /> : <Volume2 size={15} />}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(volume * 100)}
+              aria-label="Volume"
+              onChange={(e) => changeVolume(parseInt(e.target.value, 10) / 100)}
+            />
+          </div>
           <button className="btn" data-tip="How everything works, including the hidden controls" onClick={() => setHelpOpen(true)}>
             <CircleHelp size={15} />
             Help

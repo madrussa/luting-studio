@@ -123,6 +123,20 @@ body {
   align-items: center;
   gap: 8px;
 }
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 4px;
+}
+.volume-control input[type='range'] {
+  width: 92px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .modal-backdrop {
   position: fixed;
   inset: 0;
