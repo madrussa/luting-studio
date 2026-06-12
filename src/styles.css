@@ -844,6 +844,29 @@ body {
   will-change: transform;
 }
 
+.trim-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.trim-row input[type='number'] {
+  width: 70px;
+}
+.trim-note {
+  font-size: 11px;
+}
+.btn.active-btn {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+}
+
 .opt-result {
   display: flex;
   flex-direction: column;

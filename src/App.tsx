@@ -4,7 +4,8 @@ import { VoiceBoard } from './components/VoiceBoard'
 import { Converter } from './components/Converter'
 import { OutputPanel } from './components/OutputPanel'
 import type { ConvertResult } from './lib/convert'
-import { importLuting, instrumentByCode } from './lib/luting'
+import { importLuting, instrumentByCode, serializeVoiceBody } from './lib/luting'
+import { scheduledToRollNotes, notesToEvents, dominantVolume } from './lib/transform'
 import { stopPlayback, playLuting, getPlaybackInfo } from './lib/player'
 import { Music, Eye, EyeOff, Import, TriangleAlert, X, Library as LibraryIcon, Check, Heart, CircleHelp } from 'lucide-react'
 import { Library } from './components/Library'
@@ -147,6 +148,39 @@ export default function App() {
   const handleLoadLuting = (text: string) => {
     const r = importLuting(text)
     handleImport({ bpm: r.bpm, voices: r.voices.map((v) => ({ ...v, noteCount: 0 })), warnings: r.warnings })
+  }
+
+  // Trim: drop the first/last N seconds from every voice (muted ones too),
+  // keeping them aligned. Notes straddling the cut are clipped at the end
+  // boundary; notes starting before the front cut are dropped.
+  const handleTrim = (startSec: number, endSec: number) => {
+    const full = `#lute ${bpm} ` + voices.map((v) => `i${v.instrument}${v.body.replace(/\s+/g, '')}`).join('|')
+    const bodyOnly = full.slice(5)
+    if (/[@~]/.test(bodyOnly)) {
+      setImportWarnings(["Can't trim songs with tempo changes (@) or fades (~) yet — edit the text directly."])
+      return
+    }
+    const p = parseLuting(full)
+    const cutEnd = p.durationSec - endSec
+    if (cutEnd - startSec < 0.01) {
+      setImportWarnings(['That trim would remove the whole song.'])
+      return
+    }
+    const notices: string[] = []
+    if (/[A-Z]/.test(bodyOnly)) notices.push('Macros were expanded to plain notes by the trim.')
+    setVoices(
+      voices.map((v, idx) => {
+        if (v.body.trim() === '') return v
+        const kept = p.notes
+          .filter((n) => n.voice === idx && n.timeSec >= startSec - 1e-6 && n.timeSec < cutEnd - 1e-6)
+          .map((n) => ({ ...n, durSec: Math.min(n.durSec, cutEnd - n.timeSec), timeSec: n.timeSec - startSec }))
+        const body = serializeVoiceBody(notesToEvents(scheduledToRollNotes(kept, p.bpm), v.instrument === 'd'), {
+          volume: dominantVolume(kept),
+        })
+        return { ...v, body }
+      })
+    )
+    setImportWarnings(notices)
   }
 
   const handleLoadSong = (song: SavedSong) => {
@@ -293,7 +327,7 @@ export default function App() {
         <VoiceBoard voices={voices} setVoices={setVoices} bpm={bpm} setBpm={setBpm} showSyntax={showSyntax} />
       </div>
 
-      <OutputPanel luting={luting} lanes={lanes} onLoadLuting={handleLoadLuting} />
+      <OutputPanel luting={luting} lanes={lanes} onLoadLuting={handleLoadLuting} onTrim={handleTrim} />
     </div>
   )
 }

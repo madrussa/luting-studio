@@ -63,7 +63,8 @@ export function Help({ open, onClose }: Props) {
           <div className="help-title">Import, optimize, share</div>
           <ul className="help-list">
             <li><strong>Import / Convert</strong>: drop a MIDI (accurate, multi-voice, drum mapping) or an MP3 (best-effort, clean single melodies only), or paste any luting — including <strong>multilutes</strong>, which are joined automatically.</li>
-            <li><strong>Optimize</strong> compresses with macros (often 50–70% smaller) and self-checks that the music is identical. If it's still over the 493-char cheer limit, it offers numbered <strong>multilute messages</strong> to send in order.</li>
+            <li><strong>Optimize</strong> compresses with macros (often 50–70% smaller) and self-checks that the music is identical. If it's still over the 493-char cheer limit, it offers numbered <strong>multilute messages</strong> to send in order. <strong>Unoptimize</strong> expands macros back to plain notes.</li>
+            <li><strong>Trim</strong> removes N seconds from the start and/or end of the whole song, keeping every voice aligned (notes overlapping the cut are clipped).</li>
             <li>The syntax boxes are live in both directions — type luting syntax or use the editor, they're the same data. <strong>Hide syntax</strong> collapses every card to a compact mixer view.</li>
           </ul>
         </div>

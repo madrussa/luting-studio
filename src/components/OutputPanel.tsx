@@ -19,20 +19,25 @@ import {
   Clock,
   TriangleAlert,
   UnfoldHorizontal,
+  Scissors,
 } from 'lucide-react'
 
 interface Props {
   luting: string
   lanes: Lane[]
   onLoadLuting: (text: string) => void
+  onTrim: (startSec: number, endSec: number) => void
 }
 
-export function OutputPanel({ luting, lanes, onLoadLuting }: Props) {
+export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
   const [copied, setCopied] = useState(false)
   const [opt, setOpt] = useState<(OptimizeResult & { mode: 'optimize' | 'expand' }) | null>(null)
   const [optimizing, setOptimizing] = useState(false)
   const [optCopied, setOptCopied] = useState(false)
   const [copiedPart, setCopiedPart] = useState<number | null>(null)
+  const [trimOpen, setTrimOpen] = useState(false)
+  const [trimStart, setTrimStart] = useState(0)
+  const [trimEnd, setTrimEnd] = useState(0)
   const activeId = useActivePlayback()
   const playing = activeId === 'main'
   const optPlaying = activeId === 'optimized'
@@ -109,11 +114,56 @@ export function OutputPanel({ luting, lanes, onLoadLuting }: Props) {
             <UnfoldHorizontal size={14} />
             Unoptimize
           </button>
+          <button
+            className={`btn ${trimOpen ? 'active-btn' : ''}`}
+            data-tip="Remove seconds from the start and end of the song"
+            onClick={() => setTrimOpen(!trimOpen)}
+            disabled={!luting}
+          >
+            <Scissors size={14} />
+            Trim
+          </button>
           <a className="btn primary" href="https://luteboi.com/" target="_blank" rel="noreferrer">
             Open luteboi.com <ExternalLink size={14} />
           </a>
         </div>
       </div>
+      {trimOpen && parsed && (
+        <div className="trim-row">
+          <span>Remove the first</span>
+          <input
+            type="number"
+            min={0}
+            step={0.5}
+            value={trimStart}
+            onChange={(e) => setTrimStart(Math.max(0, parseFloat(e.target.value) || 0))}
+          />
+          <span>s and the last</span>
+          <input
+            type="number"
+            min={0}
+            step={0.5}
+            value={trimEnd}
+            onChange={(e) => setTrimEnd(Math.max(0, parseFloat(e.target.value) || 0))}
+          />
+          <span>s of {parsed.durationSec.toFixed(1)}s</span>
+          <button
+            className="btn small"
+            disabled={(trimStart === 0 && trimEnd === 0) || trimStart + trimEnd >= parsed.durationSec}
+            onClick={() => {
+              onTrim(trimStart, trimEnd)
+              setTrimOpen(false)
+              setTrimStart(0)
+              setTrimEnd(0)
+            }}
+          >
+            <Scissors size={13} />
+            Apply
+          </button>
+          <span className="trim-note">notes overlapping the cut are clipped; this rewrites every voice as plain notes</span>
+        </div>
+      )}
+
       <Timeline luting={luting} lanes={lanes} />
 
       <pre className="output-text code-view" dangerouslySetInnerHTML={{ __html: highlightLuting(luting) }} />
