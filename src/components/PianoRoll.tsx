@@ -673,7 +673,7 @@ export function PianoRoll({
             </div>
           </div>
           <div style={{ display: 'flex' }}>
-            <div className="roll-gutter" style={{ width: GUTTER, position: 'relative' }}>
+            <div className="roll-gutter" style={{ width: GUTTER }}>
               {mode === 'staff' ? (
                 <>
                   <span className="staff-gutter-label" style={{ top: yForIdx(27) - 8 }}>
