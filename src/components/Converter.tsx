@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { DragEvent, ChangeEvent } from "react";
-import { convertMidi } from "../lib/convert";
+import { convertMidi, MAX_CONVERT_VOICES, DEFAULT_CONVERT_VOICES } from "../lib/convert";
 import type { ConvertResult } from "../lib/convert";
 import { convertAudio } from "../lib/pitch";
 import { INSTRUMENTS, importLuting } from "../lib/luting";
@@ -13,7 +13,7 @@ interface Props {
 export function Converter({ onImport }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [maxVoices, setMaxVoices] = useState(20);
+  const [maxVoices, setMaxVoices] = useState(DEFAULT_CONVERT_VOICES);
   const [audioBpm, setAudioBpm] = useState(120);
   const [audioInstrument, setAudioInstrument] = useState("l");
   const [dragOver, setDragOver] = useState(false);
@@ -123,10 +123,10 @@ export function Converter({ onImport }: Props) {
           <input
             type="number"
             min={1}
-            max={24}
+            max={MAX_CONVERT_VOICES}
             value={maxVoices}
             onChange={(e) =>
-              setMaxVoices(Math.min(24, Math.max(1, parseInt(e.target.value, 10) || 1)))
+              setMaxVoices(Math.min(MAX_CONVERT_VOICES, Math.max(1, parseInt(e.target.value, 10) || 1)))
             }
           />
         </label>

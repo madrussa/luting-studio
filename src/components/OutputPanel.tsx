@@ -6,7 +6,7 @@ import type { OptimizeResult } from '../lib/optimize'
 import { playLuting, stopPlayback } from '../lib/player'
 import { useActivePlayback } from '../lib/usePlayback'
 import { Timeline } from './Timeline'
-import type { Lane } from './Timeline'
+import type { Lane, TrimUI } from './Timeline'
 import {
   Play,
   Square,
@@ -35,14 +35,23 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
   const [optimizing, setOptimizing] = useState(false)
   const [optCopied, setOptCopied] = useState(false)
   const [copiedPart, setCopiedPart] = useState<number | null>(null)
-  const [trimOpen, setTrimOpen] = useState(false)
-  const [trimStart, setTrimStart] = useState(0)
-  const [trimEnd, setTrimEnd] = useState(0)
+  const [trimSel, setTrimSel] = useState<{ start: number | null; end: number | null } | null>(null)
   const activeId = useActivePlayback()
   const playing = activeId === 'main'
   const optPlaying = activeId === 'optimized'
 
   useEffect(() => setOpt(null), [luting])
+
+  // ESC backs out of trim mode
+  useEffect(() => {
+    if (!trimSel) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTrimSel(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [trimSel])
+
 
   const runOptimize = (mode: 'optimize' | 'expand') => {
     setOptimizing(true)
@@ -58,6 +67,37 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
   }
 
   const parsed = useMemo(() => (luting ? parseLuting(luting) : null), [luting])
+
+  const dur = parsed?.durationSec ?? 0
+  const trimPicking: TrimUI['picking'] | null = !trimSel
+    ? null
+    : trimSel.start === null
+      ? 'start'
+      : trimSel.end === null
+        ? 'end'
+        : 'done'
+
+  const handleTrimPick = (sec: number) => {
+    setTrimSel((s) => {
+      if (!s) return s
+      if (s.start === null) return { ...s, start: Math.max(0, Math.min(sec, (s.end ?? dur) - 0.1)) }
+      if (s.end === null) return { ...s, end: Math.max(s.start + 0.1, Math.min(sec, dur)) }
+      // both set: a further click moves whichever boundary is nearer
+      if (Math.abs(sec - s.start) <= Math.abs(sec - s.end)) {
+        return { ...s, start: Math.max(0, Math.min(sec, s.end - 0.1)) }
+      }
+      return { ...s, end: Math.max(s.start + 0.1, Math.min(sec, dur)) }
+    })
+  }
+
+  const trimFirst = trimSel?.start ?? 0
+  const trimLast = trimSel?.end != null ? dur - trimSel.end : 0
+  const setTrimFirst = (v: number) =>
+    setTrimSel((s) => (s ? { ...s, start: Math.max(0, Math.min(v, (s.end ?? dur) - 0.1)) } : s))
+  const setTrimLast = (v: number) =>
+    setTrimSel((s) =>
+      s ? { ...s, end: Math.max((s.start ?? 0) + 0.1, Math.min(dur, dur - Math.max(0, v))) } : s
+    )
   const chars = luting.length
   const overLimit = chars > TWITCH_LIMIT
 
@@ -115,56 +155,81 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
             Unoptimize
           </button>
           <button
-            className={`btn ${trimOpen ? 'active-btn' : ''}`}
-            data-tip="Remove seconds from the start and end of the song"
-            onClick={() => setTrimOpen(!trimOpen)}
+            className={`btn ${trimSel ? 'active-btn' : ''}`}
+            data-tip="Trim the song: click the timeline where it should start, then where it should end"
+            onClick={() => setTrimSel(trimSel ? null : { start: null, end: null })}
             disabled={!luting}
           >
             <Scissors size={14} />
-            Trim
+            {trimSel ? 'Cancel trim' : 'Trim'}
           </button>
           <a className="btn primary" href="https://luteboi.com/" target="_blank" rel="noreferrer">
             Open luteboi.com <ExternalLink size={14} />
           </a>
         </div>
       </div>
-      {trimOpen && parsed && (
+      {trimSel && parsed && (
         <div className="trim-row">
-          <span>Remove the first</span>
+          <Scissors size={13} />
+          <span>Remove first</span>
           <input
             type="number"
             min={0}
-            step={0.5}
-            value={trimStart}
-            onChange={(e) => setTrimStart(Math.max(0, parseFloat(e.target.value) || 0))}
+            max={Math.max(0, dur - trimLast - 0.1)}
+            step={0.1}
+            value={Math.round(trimFirst * 10) / 10}
+            onChange={(e) => setTrimFirst(parseFloat(e.target.value) || 0)}
           />
-          <span>s and the last</span>
+          <span>s · last</span>
           <input
             type="number"
             min={0}
-            step={0.5}
-            value={trimEnd}
-            onChange={(e) => setTrimEnd(Math.max(0, parseFloat(e.target.value) || 0))}
+            max={Math.max(0, dur - trimFirst - 0.1)}
+            step={0.1}
+            value={Math.round(trimLast * 10) / 10}
+            onChange={(e) => setTrimLast(parseFloat(e.target.value) || 0)}
           />
-          <span>s of {parsed.durationSec.toFixed(1)}s</span>
+          <span>s</span>
+          {trimPicking === 'start' && (
+            <span>
+              — or click the timeline where the song should <strong>start</strong>.
+            </span>
+          )}
+          {trimPicking === 'end' && (
+            <span>
+              — now click where it should <strong>end</strong>.
+            </span>
+          )}
+          {trimPicking === 'done' && (
+            <span>
+              Keeping <strong>{(trimSel.end! - trimSel.start!).toFixed(1)}s</strong> of {dur.toFixed(1)}s.
+              Clicking again moves the nearest cut.
+            </span>
+          )}
           <button
             className="btn small"
-            disabled={(trimStart === 0 && trimEnd === 0) || trimStart + trimEnd >= parsed.durationSec}
+            disabled={trimFirst + trimLast < 0.05}
             onClick={() => {
-              onTrim(trimStart, trimEnd)
-              setTrimOpen(false)
-              setTrimStart(0)
-              setTrimEnd(0)
+              onTrim(trimFirst, trimLast)
+              setTrimSel(null)
             }}
           >
             <Scissors size={13} />
-            Apply
+            Apply trim
           </button>
-          <span className="trim-note">notes overlapping the cut are clipped; this rewrites every voice as plain notes</span>
+          <button className="btn small" onClick={() => setTrimSel(null)}>
+            Cancel
+          </button>
+          <span className="trim-note">notes overlapping a cut are clipped; voices are rewritten as plain notes · Esc cancels</span>
         </div>
       )}
 
-      <Timeline luting={luting} lanes={lanes} />
+      <Timeline
+        luting={luting}
+        lanes={lanes}
+        trim={trimSel && trimPicking ? { startSec: trimSel.start, endSec: trimSel.end, picking: trimPicking } : null}
+        onTrimPick={handleTrimPick}
+      />
 
       <pre className="output-text code-view" dangerouslySetInnerHTML={{ __html: highlightLuting(luting) }} />
 

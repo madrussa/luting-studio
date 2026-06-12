@@ -21,6 +21,11 @@ export interface ConvertResult {
   warnings: string[]
 }
 
+/** Ceiling for the MIDI converter's voice count (the busiest are kept). */
+export const MAX_CONVERT_VOICES = 50
+/** Default for the converter UI — high enough to keep most songs whole. */
+export const DEFAULT_CONVERT_VOICES = 20
+
 // GM program number -> luting instrument code
 function gmToInstrument(program: number): string {
   if (program <= 7) return 'k' // pianos

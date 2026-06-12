@@ -16,12 +16,21 @@ export interface Lane {
   label: string
 }
 
+export interface TrimUI {
+  startSec: number | null
+  endSec: number | null
+  picking: 'start' | 'end' | 'done'
+}
+
 interface Props {
   luting: string
   lanes: Lane[]
+  /** trim mode: clicks pick cut points instead of seeking */
+  trim?: TrimUI | null
+  onTrimPick?: (sec: number) => void
 }
 
-export function Timeline({ luting, lanes }: Props) {
+export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
   const parsed = useMemo(() => (luting ? parseLuting(luting) : null), [luting])
   const sortedNotes = useMemo(
     () => (parsed ? [...parsed.notes].sort((a, b) => a.timeSec - b.timeSec) : []),
@@ -32,6 +41,7 @@ export function Timeline({ luting, lanes }: Props) {
   const hlRef = useRef<HTMLCanvasElement>(null)
   const playheadRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  const [hoverSec, setHoverSec] = useState<number | null>(null)
   const activeId = useActivePlayback()
   const dragging = useRef(false)
   const lastSeek = useRef(0)
@@ -147,19 +157,39 @@ export function Timeline({ luting, lanes }: Props) {
     lastSeek.current = Date.now()
   }
 
+  const secAt = (clientX: number): number => {
+    const rect = wrapRef.current!.getBoundingClientRect()
+    const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    return frac * parsed.durationSec
+  }
+
   const onPointerDown = (e: ReactPointerEvent) => {
+    if (trim && onTrimPick) {
+      onTrimPick(secAt(e.clientX))
+      return
+    }
     dragging.current = true
     e.currentTarget.setPointerCapture(e.pointerId)
     seekTo(e.clientX)
   }
   const onPointerMove = (e: ReactPointerEvent) => {
+    if (trim) {
+      setHoverSec(secAt(e.clientX))
+      return
+    }
     if (dragging.current && Date.now() - lastSeek.current > 250) seekTo(e.clientX)
   }
   const onPointerUp = (e: ReactPointerEvent) => {
+    if (trim) return
     if (!dragging.current) return
     dragging.current = false
     if (Date.now() - lastSeek.current > 120) seekTo(e.clientX)
   }
+
+  // trim overlay: shaded regions that will be removed, labelled in seconds
+  const dur = parsed.durationSec || 1
+  const startCut = trim ? (trim.startSec ?? (trim.picking === 'start' ? hoverSec : null)) : null
+  const endCut = trim ? (trim.endSec ?? (trim.picking === 'end' ? hoverSec : null)) : null
 
   return (
     <div className="timeline">
@@ -178,11 +208,25 @@ export function Timeline({ luting, lanes }: Props) {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        title="Click or drag to play from here"
+        onPointerLeave={() => setHoverSec(null)}
+        title={trim ? undefined : 'Click or drag to play from here'}
       >
         <canvas ref={baseRef} className="timeline-canvas" />
         <canvas ref={hlRef} className="timeline-canvas timeline-hl" />
         <div ref={playheadRef} className="playhead" />
+        {startCut !== null && startCut > 0.005 && (
+          <div className="trim-shade start" style={{ left: 0, width: `${(Math.min(startCut, dur) / dur) * 100}%` }}>
+            <span>−{startCut.toFixed(1)}s</span>
+          </div>
+        )}
+        {endCut !== null && endCut < dur - 0.005 && (
+          <div
+            className="trim-shade end"
+            style={{ left: `${(Math.max(0, endCut) / dur) * 100}%`, width: `${((dur - Math.max(0, endCut)) / dur) * 100}%` }}
+          >
+            <span>−{(dur - endCut).toFixed(1)}s</span>
+          </div>
+        )}
       </div>
     </div>
   )

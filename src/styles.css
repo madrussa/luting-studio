@@ -856,11 +856,39 @@ body {
   border-radius: 8px;
   padding: 8px 12px;
 }
-.trim-row input[type='number'] {
-  width: 70px;
-}
 .trim-note {
   font-size: 11px;
+}
+.trim-row input[type='number'] {
+  width: 72px;
+}
+.trim-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(255, 84, 112, 0.2);
+  pointer-events: none;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+}
+.trim-shade.start {
+  border-right: 2px solid var(--danger);
+  justify-content: flex-end;
+}
+.trim-shade.end {
+  border-left: 2px solid var(--danger);
+  justify-content: flex-start;
+}
+.trim-shade span {
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(255, 84, 112, 0.9);
+  padding: 1px 6px;
+  border-radius: 0 0 6px 6px;
+  margin: 0 3px;
+  white-space: nowrap;
 }
 .btn.active-btn {
   border-color: var(--accent-2);
