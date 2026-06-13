@@ -145,10 +145,17 @@ export function serializeVoiceBody(events: VoiceEvent[], opts: SerializeOptions 
     let impliedOct = pitches[0].octave
     let prev = pitches[0]
     for (const p of pitches.slice(1)) {
+      // luteboi bumps the implied octave when the next letter isn't strictly
+      // above the previous one; flats share a letter (d' then d), so the bump
+      // can overshoot — '<' brings it back down, '>' covers larger jumps up.
       let implied = impliedOct + (letterIdx(p.letter) <= letterIdx(prev.letter) ? 1 : 0)
       while (implied < p.octave) {
         out += '>'
         implied++
+      }
+      while (implied > p.octave) {
+        out += '<'
+        implied--
       }
       out += p.letter
       impliedOct = implied
