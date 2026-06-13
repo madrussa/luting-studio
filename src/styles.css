@@ -908,6 +908,22 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+.staff-line-stub {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.45);
+  transform: translateY(-0.5px);
+}
+.staff-clef {
+  position: absolute;
+  left: 10px;
+  line-height: 1;
+  font-family: serif;
+  color: var(--text);
+  pointer-events: none;
+}
 .roll-row-label {
   font-size: 8.5px;
   color: var(--text-dim);

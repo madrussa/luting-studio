@@ -161,20 +161,11 @@ export function PianoRoll({
       ctx.fillStyle = u % 16 === 0 ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.03)'
       ctx.fillRect(u * pxPerUnit, yForIdx(31), 1, yForIdx(11) - yForIdx(31))
     }
-    // staff lines
+    // staff lines (the clefs live in the sticky gutter, so notes start at x=0)
     ctx.fillStyle = 'rgba(255,255,255,0.45)'
     for (const li of [...TREBLE_LINES, ...BASS_LINES]) {
       ctx.fillRect(offset, yForIdx(li) - 0.5, cw, 1)
     }
-    // clefs pinned to the left edge of the visible window
-    ctx.fillStyle = 'rgba(20,18,31,0.85)'
-    ctx.fillRect(offset, yForIdx(32), 24, yForIdx(22) - yForIdx(32))
-    ctx.fillRect(offset, yForIdx(20), 24, yForIdx(10) - yForIdx(20))
-    ctx.fillStyle = 'rgba(255,255,255,0.85)'
-    ctx.font = '34px serif'
-    ctx.fillText('\u{1D11E}', offset + 2, yForIdx(25) + 12) // G clef on G4
-    ctx.font = '26px serif'
-    ctx.fillText('\u{1D122}', offset + 3, yForIdx(17) + 8) // F clef on F3
 
     const drawLedgers = (idx: number, x: number) => {
       ctx.fillStyle = 'rgba(255,255,255,0.4)'
@@ -676,15 +667,16 @@ export function PianoRoll({
             <div className="roll-gutter" style={{ width: GUTTER }}>
               {mode === 'staff' ? (
                 <>
-                  <span className="staff-gutter-label" style={{ top: yForIdx(27) - 8 }}>
-                    treble
+                  {[...TREBLE_LINES, ...BASS_LINES].map((li) => (
+                    <div key={li} className="staff-line-stub" style={{ top: yForIdx(li) }} />
+                  ))}
+                  <span className="staff-clef" style={{ top: yForIdx(33), fontSize: 52 }}>
+                    {'\u{1D11E}'}
                   </span>
-                  <span className="staff-gutter-label" style={{ top: yForIdx(21) - 8 }}>
-                    c4
+                  <span className="staff-clef" style={{ top: yForIdx(20), fontSize: 34 }}>
+                    {'\u{1D122}'}
                   </span>
-                  <span className="staff-gutter-label" style={{ top: yForIdx(15) - 8 }}>
-                    bass
-                  </span>
+                  <span className="staff-gutter-label" style={{ top: yForIdx(21) - 7 }}>c4</span>
                 </>
               ) : (
                 Array.from({ length: rows }, (_, r) => (
