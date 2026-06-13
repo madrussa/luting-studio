@@ -56,3 +56,45 @@ export async function deleteSong(id: string): Promise<void> {
 
 export const newSongId = (): string =>
   typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `song-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+// ---------------------------------------------------------------------------
+// Legacy migration: the original luteboi site kept its saved songs in a
+// localStorage entry under the key "luting" as { title, message, songs }.
+// We pull those into the IndexedDB library once, on first load.
+
+const LEGACY_KEY = 'luting'
+const LEGACY_MIGRATED_KEY = 'luting-studio-legacy-migrated'
+
+/**
+ * Saved songs (name -> luting text) from a legacy luteboi localStorage entry,
+ * or null if there are none or they've already been migrated.
+ */
+export function readLegacyLibrary(): Record<string, string> | null {
+  try {
+    if (localStorage.getItem(LEGACY_MIGRATED_KEY)) return null
+    const raw = localStorage.getItem(LEGACY_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    const out: Record<string, string> = {}
+    if (data?.songs && typeof data.songs === 'object') {
+      for (const [name, text] of Object.entries(data.songs)) {
+        if (typeof text === 'string' && text.trim()) out[name] = text
+      }
+    }
+    // fall back to a lone open song with no songs map
+    if (!Object.keys(out).length && typeof data?.title === 'string' && typeof data?.message === 'string' && data.message.trim()) {
+      out[data.title || 'Untitled luting'] = data.message
+    }
+    return Object.keys(out).length ? out : null
+  } catch {
+    return null
+  }
+}
+
+export function markLegacyMigrated() {
+  try {
+    localStorage.setItem(LEGACY_MIGRATED_KEY, '1')
+  } catch {
+    // best effort; if it doesn't stick, migration just re-runs (it's idempotent by name)
+  }
+}

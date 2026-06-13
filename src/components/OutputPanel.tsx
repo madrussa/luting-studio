@@ -23,6 +23,7 @@ import {
   Scissors,
   FileMusic,
 } from 'lucide-react'
+import lutingMascot from '../assets/luting.webp'
 
 interface Props {
   luting: string
@@ -123,7 +124,10 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
   return (
     <section className="output">
       <div className="output-header">
-        <div className="panel-title">Your luting</div>
+        <div className="panel-title">
+          Your luting
+          {playing && <img className="luting-mascot" src={lutingMascot} alt="" aria-hidden="true" />}
+        </div>
         <div className="output-actions">
           <span className={`char-count ${overLimit ? 'over' : ''}`}>
             {chars} chars{' '}

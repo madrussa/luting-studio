@@ -8,7 +8,6 @@ import { importLuting, instrumentByCode, serializeVoiceBody } from './lib/luting
 import { scheduledToRollNotes, notesToEvents, dominantVolume } from './lib/transform'
 import { stopPlayback, playLuting, getPlaybackInfo, getMasterVolume, setMasterVolume } from './lib/player'
 import {
-  Music,
   Eye,
   EyeOff,
   Import,
@@ -25,9 +24,10 @@ import {
 import { Library } from './components/Library'
 import { Credits } from './components/Credits'
 import { Help } from './components/Help'
-import { saveSong } from './lib/library'
+import { saveSong, listSongs, newSongId, readLegacyLibrary, markLegacyMigrated } from './lib/library'
 import type { SavedSong } from './lib/library'
 import { parseLuting } from './lib/luting'
+import logoUrl from './assets/conducting.webp'
 
 export interface VoiceUI {
   id: string
@@ -50,6 +50,9 @@ const DEMO: VoiceUI[] = [
 ]
 
 const STORAGE_KEY = 'luting-studio-v1'
+
+// guards the one-time legacy migration against React StrictMode's double mount
+let legacyMigrationStarted = false
 
 function loadSaved(): {
   bpm: number
@@ -113,6 +116,70 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // One-time migration of a legacy luteboi library (localStorage "luting")
+  // into our IndexedDB song library. The module-level guard makes it run once
+  // even under StrictMode's double-mount.
+  useEffect(() => {
+    if (legacyMigrationStarted) return
+    legacyMigrationStarted = true
+    const legacy = readLegacyLibrary()
+    if (!legacy) return
+    ;(async () => {
+      try {
+        const existingNames = new Set((await listSongs()).map((s) => s.name))
+        let count = 0
+        for (const [name, text] of Object.entries(legacy)) {
+          if (existingNames.has(name)) continue
+          let r
+          try {
+            r = importLuting(text)
+          } catch {
+            continue
+          }
+          if (!r.voices.length) continue
+          const newVoices: VoiceUI[] = r.voices.map((v) => ({
+            id: newVoiceId(),
+            instrument: v.instrument,
+            body: v.body,
+            label: v.label,
+          }))
+          const text2 =
+            `#lute ${r.bpm} ` +
+            newVoices
+              .filter((v) => v.body.trim() !== '')
+              .map((v) => `i${v.instrument}${v.body}`)
+              .join('|')
+          let durationSec = 0
+          try {
+            durationSec = parseLuting(text2).durationSec
+          } catch {
+            // leave 0 if it won't parse
+          }
+          await saveSong({
+            id: newSongId(),
+            name,
+            bpm: r.bpm,
+            voices: newVoices,
+            updatedAt: Date.now() + count,
+            chars: text2.length,
+            voiceCount: newVoices.filter((v) => v.body.trim() !== '').length,
+            durationSec,
+          })
+          existingNames.add(name)
+          count++
+        }
+        markLegacyMigrated()
+        if (count > 0) {
+          setImportWarnings([
+            `Imported ${count} song${count === 1 ? '' : 's'} from your luteboi library — open the Library to find ${count === 1 ? 'it' : 'them'}.`,
+          ])
+        }
+      } catch {
+        // IndexedDB unavailable; leave the flag unset so it retries next load
+      }
+    })()
   }, [])
 
   useEffect(() => {
@@ -257,9 +324,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-icon">
-            <Music size={24} />
-          </span>
+          <img className="brand-icon" src={logoUrl} alt="Luting Studio" width={30} height={30} />
           <h1>Luting Studio</h1>
           <span className="tagline">
             compose &amp; convert lutings for{' '}
