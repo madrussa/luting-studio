@@ -3,13 +3,26 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { parseLuting, INSTRUMENTS } from '../lib/luting'
 import { playLuting, getPlaybackInfo } from '../lib/player'
 import { useActivePlayback } from '../lib/usePlayback'
+import { useTheme, canvasColors, getTheme } from '../lib/theme'
 
-const COLORS: Record<string, string> = {}
+const HUES: Record<string, number> = {}
 INSTRUMENTS.forEach((ins, i) => {
-  COLORS[ins.code] = `hsl(${(i * 137 + 210) % 360} 80% 68%)`
+  HUES[ins.code] = (i * 137 + 210) % 360
 })
 
-export const instrumentColor = (code: string): string => COLORS[code] ?? '#9d7bff'
+export const instrumentColor = (code: string): string => {
+  const hue = HUES[code] ?? 264
+  if (getTheme() === 'light') {
+    // Yellows/greens are perceptually bright, so they wash out on white at a
+    // fixed lightness. Darken them by how close the hue is to the bright band
+    // (~80°), leaving blues/reds/purples near the base lightness.
+    const d = Math.min(Math.abs(hue - 80), 360 - Math.abs(hue - 80))
+    const w = Math.max(0, 1 - d / 110)
+    const l = 45 - 19 * w
+    return `hsl(${hue} 72% ${l.toFixed(1)}%)`
+  }
+  return `hsl(${hue} 75% 68%)`
+}
 
 export interface Lane {
   icon: string
@@ -42,6 +55,7 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
   const playheadRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const [hoverSec, setHoverSec] = useState<number | null>(null)
+  const theme = useTheme()
   const activeId = useActivePlayback()
   const dragging = useRef(false)
   const lastSeek = useRef(0)
@@ -83,14 +97,15 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
     const ctx = canvas.getContext('2d')!
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, width, H)
+    const col = canvasColors()
 
     for (let i = 0; i < laneCount; i++) {
-      ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)'
+      ctx.fillStyle = i % 2 ? col.shadeB : col.shadeA
       ctx.fillRect(0, i * laneH, width, laneH)
     }
     const dur = parsed.durationSec || 1
     const step = dur > 90 ? 30 : dur > 30 ? 10 : 5
-    ctx.fillStyle = 'rgba(255,255,255,0.08)'
+    ctx.fillStyle = col.bar
     ctx.font = '9px sans-serif'
     for (let s = step; s < dur; s += step) {
       const x = (s / dur) * width
@@ -101,13 +116,13 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
     for (const n of sortedNotes) {
       if (n.voice >= laneCount) continue
       const r = noteRect(n, dur)
-      ctx.fillStyle = COLORS[n.instrument] ?? '#9d7bff'
-      ctx.globalAlpha = 0.7
+      ctx.fillStyle = instrumentColor(n.instrument)
+      ctx.globalAlpha = 0.75
       ctx.fillRect(r.x, r.y, r.w, r.h)
     }
     ctx.globalAlpha = 1
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, sortedNotes, width, laneCount, laneH, H])
+  }, [parsed, sortedNotes, width, laneCount, laneH, H, theme])
 
   // playhead + lit-up notes while playing
   useEffect(() => {
@@ -126,6 +141,7 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
     }
     ph.style.opacity = '1'
     const dur = parsed.durationSec || 1
+    const ink = canvasColors().ink
     let raf = 0
     const tick = () => {
       const info = getPlaybackInfo()
@@ -136,7 +152,7 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
         if (n.timeSec > info.position) break
         if (n.timeSec + n.durSec < info.position || n.voice >= laneCount) continue
         const r = noteRect(n, dur)
-        ctx.fillStyle = '#ffffff'
+        ctx.fillStyle = ink
         ctx.fillRect(r.x, r.y - 1, r.w, r.h + 2)
       }
       raf = requestAnimationFrame(tick)
@@ -144,7 +160,7 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
     tick()
     return () => cancelAnimationFrame(raf)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, parsed, sortedNotes, width, laneCount, laneH, H])
+  }, [activeId, parsed, sortedNotes, width, laneCount, laneH, H, theme])
 
   if (!parsed || parsed.notes.length === 0) return null
 

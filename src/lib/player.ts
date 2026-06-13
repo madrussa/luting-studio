@@ -468,16 +468,23 @@ export function playLuting(text: string, opts: PlayOptions = {}): PlayHandle {
   return { stop: stopPlayback, durationSec }
 }
 
-/** Quick audition for the instrument palette. Toggles off when already playing. */
-export function previewInstrument(code: string) {
+/**
+ * Quick audition for the instrument palette. Toggles off when already playing.
+ * In Quality mode it waits for the instrument's sample pack to load first, so
+ * the audition always uses the real sample (the caller can show a spinner
+ * while the returned promise is pending).
+ */
+export async function previewInstrument(code: string): Promise<void> {
   const id = `instrument:${code}`
   if (getActivePlaybackId() === id) {
     stopPlayback()
     return
   }
-  if (code === 'd') {
-    playLuting('#lute 240 ido0ao3co4co3c', { id })
-  } else {
-    playLuting(`#lute 480 i${code}t2ceg(ceg)4`, { id })
+  if (getPlaybackMode() === 'quality') {
+    await loadBank(code) // resolves instantly if cached or synth-only
+    // a newer click may have superseded this one while the pack downloaded
+    if (getActivePlaybackId() === id) return
   }
+  const text = code === 'd' ? '#lute 240 ido0ao3co4co3c' : `#lute 480 i${code}t2ceg(ceg)4`
+  playLuting(text, { id })
 }

@@ -7,6 +7,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { ScheduledNote } from '../lib/luting'
 import { getPlaybackInfo } from '../lib/player'
 import { useActivePlayback } from '../lib/usePlayback'
+import { useTheme } from '../lib/theme'
 import { instrumentColor } from './Timeline'
 
 const H = 26
@@ -27,6 +28,7 @@ export function VoiceStrip({ notes, durationSec, voiceId, instrument, onScrub }:
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const phRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  const theme = useTheme()
   const dragging = useRef(false)
   const lastSeek = useRef(0)
   const activeId = useActivePlayback()
@@ -69,7 +71,7 @@ export function VoiceStrip({ notes, durationSec, voiceId, instrument, onScrub }:
       ctx.fillRect(x, y, w, 3)
     }
     ctx.globalAlpha = 1
-  }, [notes, durationSec, width, instrument])
+  }, [notes, durationSec, width, instrument, theme])
 
   // playhead
   useEffect(() => {

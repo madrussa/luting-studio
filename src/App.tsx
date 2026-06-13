@@ -23,6 +23,8 @@ import {
   Zap,
   AudioWaveform,
   Loader2,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { Library } from './components/Library'
 import { Credits } from './components/Credits'
@@ -38,6 +40,7 @@ import {
   isLoadingSamples,
   prewarm,
 } from './lib/samples'
+import { useTheme, toggleTheme } from './lib/theme'
 import logoUrl from './assets/conducting.webp'
 
 export interface VoiceUI {
@@ -98,6 +101,7 @@ export default function App() {
   const [songName, setSongName] = useState(() => loadSaved()?.songName ?? '')
   const [currentSongId, setCurrentSongId] = useState<string | null>(() => loadSaved()?.currentSongId ?? null)
   const [justSaved, setJustSaved] = useState(false)
+  const theme = useTheme()
   const [volume, setVolume] = useState(() => getMasterVolume())
   const prevVolume = useRef(0.8)
   const [playbackMode, setPlaybackModeState] = useState(() => getPlaybackMode())
@@ -365,6 +369,27 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           <button
+            className="icon-btn"
+            aria-label="Toggle theme"
+            data-tip={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+          <div className="volume-control" data-tip="Volume for all sounds — click the icon to mute">
+            <button className="icon-btn" aria-label="Mute" onClick={toggleMute}>
+              {volume === 0 ? <VolumeX size={15} /> : volume < 0.5 ? <Volume1 size={15} /> : <Volume2 size={15} />}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(volume * 100)}
+              aria-label="Volume"
+              onChange={(e) => changeVolume(parseInt(e.target.value, 10) / 100)}
+            />
+          </div>
+          <button
             className={`btn ${playbackMode === 'quality' ? 'active-btn' : ''}`}
             data-tip={
               playbackMode === 'quality'
@@ -382,41 +407,27 @@ export default function App() {
             )}
             {playbackMode === 'quality' ? 'Quality' : 'Performance'}
           </button>
-          <div className="volume-control" data-tip="Volume for all sounds — click the icon to mute">
-            <button className="icon-btn" aria-label="Mute" onClick={toggleMute}>
-              {volume === 0 ? <VolumeX size={15} /> : volume < 0.5 ? <Volume1 size={15} /> : <Volume2 size={15} />}
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round(volume * 100)}
-              aria-label="Volume"
-              onChange={(e) => changeVolume(parseInt(e.target.value, 10) / 100)}
-            />
-          </div>
-          <button className="btn" data-tip="How everything works, including the hidden controls" onClick={() => setHelpOpen(true)}>
-            <CircleHelp size={15} />
-            Help
-          </button>
-          <button className="btn" data-tip="The projects this app is built on" data-tip-pos="right" onClick={() => setCreditsOpen(true)}>
-            <Heart size={15} className="heart" />
-            Credits
-          </button>
-          <button className="btn" onClick={() => setLibraryOpen(true)}>
-            {justSaved ? <Check size={15} /> : <LibraryIcon size={15} />}
-            {justSaved ? 'Saved' : 'Library'}
-          </button>
           <button
             className="btn"
             data-tip={showSyntax ? 'Hide the syntax boxes on every voice' : 'Show the syntax boxes on every voice'}
-            data-tip-pos="right"
             onClick={() => setShowSyntax(!showSyntax)}
           >
             {showSyntax ? <EyeOff size={15} /> : <Eye size={15} />}
             {showSyntax ? 'Hide syntax' : 'Show syntax'}
           </button>
-          <button className="btn primary" onClick={() => setImportOpen(true)}>
+          <button className="btn" data-tip="How everything works, including the hidden controls" onClick={() => setHelpOpen(true)}>
+            <CircleHelp size={15} />
+            Help
+          </button>
+          <button className="btn" data-tip="The projects this app is built on" onClick={() => setCreditsOpen(true)}>
+            <Heart size={15} className="heart" />
+            Credits
+          </button>
+          <button className="btn" data-tip="Save &amp; browse your songs" onClick={() => setLibraryOpen(true)}>
+            {justSaved ? <Check size={15} /> : <LibraryIcon size={15} />}
+            {justSaved ? 'Saved' : 'Library'}
+          </button>
+          <button className="btn primary" data-tip-pos="right" onClick={() => setImportOpen(true)}>
             <Import size={15} />
             Import / Convert
           </button>

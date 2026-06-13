@@ -10,6 +10,32 @@
   --accent-2: #5ad1b3;
   --danger: #ff7a90;
   --warn: #ffc266;
+  --bg-glow: #2a2347;
+  --on-accent: #16122a;
+  --staff-line: rgba(255, 255, 255, 0.45);
+  --hairline: rgba(255, 255, 255, 0.06);
+  /* code/syntax surfaces stay dark in both themes so the highlighting reads */
+  --code-bg: #15121f;
+  --code-border: #322c4a;
+  --code-text: #e8e4f5;
+}
+
+:root[data-theme='light'] {
+  --bg: #eceaf4;
+  --bg-soft: #f6f4fb;
+  --panel: #ffffff;
+  --panel-2: #f1eef9;
+  --border: #d8d2ea;
+  --text: #261f3c;
+  --text-dim: #6d6690;
+  --accent: #7c4dff;
+  --accent-2: #15a07e;
+  --danger: #d63a55;
+  --warn: #b07514;
+  --bg-glow: #dcd6f2;
+  --on-accent: #ffffff;
+  --staff-line: rgba(40, 30, 70, 0.55);
+  --hairline: rgba(40, 30, 70, 0.1);
 }
 
 * {
@@ -47,7 +73,7 @@
 body {
   margin: 0;
   font-family: 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
-  background: radial-gradient(1200px 600px at 70% -10%, #2a2347 0%, var(--bg) 55%);
+  background: radial-gradient(1200px 600px at 70% -10%, var(--bg-glow) 0%, var(--bg) 55%);
   color: var(--text);
   min-height: 100vh;
 }
@@ -259,7 +285,7 @@ body {
   white-space: nowrap;
 }
 .icon-btn.danger-armed {
-  color: #16122a;
+  color: var(--on-accent);
   background: var(--danger);
   border-color: var(--danger);
 }
@@ -333,10 +359,11 @@ body {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
   border-radius: 8px;
   padding: 8px 10px;
+  color: var(--code-text);
 }
 .help-table {
   border-collapse: collapse;
@@ -355,7 +382,7 @@ body {
 }
 .help-table td {
   padding: 4px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--hairline);
   color: var(--text);
   vertical-align: top;
 }
@@ -623,6 +650,7 @@ body {
   gap: 8px;
 }
 .chip {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -635,6 +663,15 @@ body {
   cursor: grab;
   transition: transform 0.1s, border-color 0.15s;
   font-family: inherit;
+}
+.chip.loading {
+  border-color: var(--accent-2);
+}
+.chip-spinner {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  color: var(--accent-2);
 }
 .chip:hover {
   border-color: var(--accent);
@@ -734,7 +771,7 @@ body {
 }
 .voice-card.muted .voice-body {
   text-decoration: line-through;
-  text-decoration-color: rgba(255, 255, 255, 0.25);
+  text-decoration-color: var(--text-dim);
 }
 .icon-btn.muted-toggle {
   color: var(--warn);
@@ -775,8 +812,8 @@ body {
 .voice-body-wrap {
   max-height: 300px;
   overflow-y: auto;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
   border-radius: 8px;
 }
 .voice-body-wrap:focus-within {
@@ -787,7 +824,7 @@ body {
   font-size: 13px;
   line-height: 1.5;
   min-height: 36px;
-  color: var(--text);
+  color: var(--code-text);
 }
 .code-editor textarea {
   outline: none;
@@ -913,7 +950,7 @@ body {
   left: 0;
   right: 0;
   height: 1px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--staff-line);
   transform: translateY(-0.5px);
 }
 .staff-clef {
@@ -1157,6 +1194,9 @@ pre.code-view {
   user-select: text;
   resize: vertical;
   overflow-y: auto;
+  background: var(--code-bg);
+  border-color: var(--code-border);
+  color: var(--code-text);
 }
 
 /* ---- luting syntax highlighting (theme for the migrated grammar) ---- */
@@ -1261,7 +1301,7 @@ select {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #16122a;
+  color: var(--on-accent);
   font-weight: 600;
 }
 .btn.primary:hover {
@@ -1322,8 +1362,8 @@ select {
   z-index: 1000;
   pointer-events: none;
   background: #16131f;
-  border: 1px solid var(--border);
-  color: var(--text);
+  border: 1px solid #332c4a;
+  color: #f3f0ff;
   padding: 5px 10px;
   border-radius: 7px;
   font-size: 11.5px;

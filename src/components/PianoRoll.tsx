@@ -18,6 +18,7 @@ import type { RollNote } from '../lib/transform'
 import { playLuting, getPlaybackInfo } from '../lib/player'
 import { useActivePlayback } from '../lib/usePlayback'
 import { useRollView, setRollView, getRollView, clampZoom } from '../lib/rollView'
+import { useTheme, canvasColors } from '../lib/theme'
 import { instrumentColor } from './Timeline'
 import { Minus, Plus, TriangleAlert, LayoutGrid, Music } from 'lucide-react'
 
@@ -101,6 +102,7 @@ export function PianoRoll({
   const lastScrub = useRef(0)
   const activeId = useActivePlayback()
   const tracking = activeId === voiceId || activeId === 'main'
+  const theme = useTheme()
 
   const unsupported = /[@~]/.test(body)
   const hasMacros = /[A-Z]/.test(body)
@@ -153,22 +155,23 @@ export function PianoRoll({
 
   const drawStaff = (ctx: CanvasRenderingContext2D, offset: number, cw: number) => {
     const color = instrumentColor(instrument)
+    const col = canvasColors()
     // beat/bar lines behind everything
     const beatStep = pxPerUnit >= 1.5 ? 4 : 16
     const uFrom = Math.floor(offset / pxPerUnit / beatStep) * beatStep
     const uTo = Math.min(totalUnits, Math.ceil((offset + cw) / pxPerUnit))
     for (let u = uFrom; u <= uTo; u += beatStep) {
-      ctx.fillStyle = u % 16 === 0 ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.03)'
+      ctx.fillStyle = u % 16 === 0 ? col.staffBar : col.staffBeat
       ctx.fillRect(u * pxPerUnit, yForIdx(31), 1, yForIdx(11) - yForIdx(31))
     }
     // staff lines (the clefs live in the sticky gutter, so notes start at x=0)
-    ctx.fillStyle = 'rgba(255,255,255,0.45)'
+    ctx.fillStyle = col.staffLine
     for (const li of [...TREBLE_LINES, ...BASS_LINES]) {
       ctx.fillRect(offset, yForIdx(li) - 0.5, cw, 1)
     }
 
     const drawLedgers = (idx: number, x: number) => {
-      ctx.fillStyle = 'rgba(255,255,255,0.4)'
+      ctx.fillStyle = col.ledger
       const line = (p: number) => ctx.fillRect(x - 7, yForIdx(p) - 0.5, 14, 1)
       if (idx >= 21 && idx <= 22) line(21) // middle C
       for (let p = 33; p <= idx; p += 2) line(p)
@@ -228,15 +231,15 @@ export function PianoRoll({
       const gx = u * pxPerUnit
       const gy = yForIdx(pos)
       ctx.globalAlpha = 0.5
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = col.ink
       ctx.lineWidth = 1.3
       ctx.beginPath()
       ctx.ellipse(gx + 4, gy, 4.4, 3.2, -0.25, 0, Math.PI * 2)
       ctx.stroke()
-      ctx.fillStyle = 'rgba(255,255,255,0.25)'
+      ctx.fillStyle = col.hover
       ctx.fillRect(gx, gy - 2, Math.max(2, noteLen * pxPerUnit - 1), 4)
       if (flat) {
-        ctx.fillStyle = '#ffffff'
+        ctx.fillStyle = col.ink
         ctx.font = 'bold 11px serif'
         ctx.fillText('♭', gx - 7, gy + 3.5)
       }
@@ -245,13 +248,14 @@ export function PianoRoll({
   }
 
   const drawGrid = (ctx: CanvasRenderingContext2D, offset: number, cw: number) => {
+    const col = canvasColors()
     for (let r = 0; r < rows; r++) {
       const midi = MIDI_MAX - r
       const shade = isDrum ? r % 2 === 0 : Math.floor(midi / 12) % 2 === 0
-      ctx.fillStyle = shade ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.015)'
+      ctx.fillStyle = shade ? col.shadeA : col.shadeB
       ctx.fillRect(offset, r * rowH, cw, rowH)
       if (!isDrum && midi % 12 === 0) {
-        ctx.fillStyle = 'rgba(90,209,179,0.10)'
+        ctx.fillStyle = col.cRow
         ctx.fillRect(offset, r * rowH, cw, rowH)
       }
     }
@@ -259,11 +263,10 @@ export function PianoRoll({
     const uFrom = Math.floor(offset / pxPerUnit / beatStep) * beatStep
     const uTo = Math.min(totalUnits, Math.ceil((offset + cw) / pxPerUnit))
     for (let u = uFrom; u <= uTo; u += beatStep) {
-      ctx.fillStyle = u % 16 === 0 ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.06)'
+      ctx.fillStyle = u % 16 === 0 ? col.bar : col.beat
       ctx.fillRect(u * pxPerUnit, 0, 1, H)
     }
-    const color = instrumentColor(instrument)
-    ctx.fillStyle = color
+    ctx.fillStyle = instrumentColor(instrument)
     for (const n of derived.notes) {
       const x = n.start * pxPerUnit
       const w = Math.max(2, n.dur * pxPerUnit - 1)
@@ -274,7 +277,7 @@ export function PianoRoll({
     }
     if (hover.current) {
       const { u, pos } = hover.current
-      ctx.fillStyle = 'rgba(255,255,255,0.25)'
+      ctx.fillStyle = col.hover
       ctx.fillRect(u * pxPerUnit + 0.5, pos * rowH + 1, Math.max(2, noteLen * pxPerUnit - 1), rowH - 2)
     }
   }
@@ -298,25 +301,26 @@ export function PianoRoll({
     if (mode === 'staff') drawStaff(ctx, offset, cw)
     else drawGrid(ctx, offset, cw)
 
-    // caret spotlight: crosshair band + white-hot note(s) under the cursor
+    // caret spotlight: crosshair band + ink-hot note(s) under the cursor
     if (highlight) {
+      const col = canvasColors()
       const picked = []
       for (let k = highlight.from; k < highlight.from + highlight.count && k < derived.notes.length; k++) {
         const r = noteRect(derived.notes[k])
         if (r) picked.push(r)
       }
-      ctx.fillStyle = 'rgba(255,255,255,0.08)'
+      ctx.fillStyle = col.band
       for (const r of picked) {
         ctx.fillRect(r.x, 0, r.w, H)
         if (mode === 'grid') ctx.fillRect(offset, r.y, cw, r.h)
       }
       ctx.shadowColor = instrumentColor(instrument)
       ctx.shadowBlur = 10
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = col.ink
       ctx.lineWidth = 1.5
       for (const r of picked) {
         if (mode === 'grid') {
-          ctx.fillStyle = '#ffffff'
+          ctx.fillStyle = col.ink
           ctx.fillRect(r.x + 0.5, r.y, r.w, r.h)
         }
         ctx.strokeRect(r.x - 1, r.y - 0.5, r.w + 2.5, r.h + 1)
@@ -394,6 +398,7 @@ export function PianoRoll({
     ph.style.opacity = '1'
     const unit = 60 / bpm
     const color = instrumentColor(instrument)
+    const flashRgb = canvasColors().flashRgb
     let raf = 0
     const tick = () => {
       const info = getPlaybackInfo()
@@ -420,7 +425,7 @@ export function PianoRoll({
         const pad = fl * 2.5
         octx.shadowColor = color
         octx.shadowBlur = 6 + fl * 16
-        octx.fillStyle = `rgba(255,255,255,${(0.55 + 0.45 * fl).toFixed(3)})`
+        octx.fillStyle = `rgba(${flashRgb},${(0.55 + 0.45 * fl).toFixed(3)})`
         octx.fillRect(r.x - pad, r.y - pad, r.w + pad * 2, r.h + pad * 2)
       }
       octx.shadowBlur = 0
@@ -432,7 +437,7 @@ export function PianoRoll({
       clear()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tracking, pxPerUnit, bpm, derived, viewW, W, H, rowH, instrument, isDrum, mode])
+  }, [tracking, pxPerUnit, bpm, derived, viewW, W, H, rowH, instrument, isDrum, mode, theme])
 
   // bring the caret-spotlighted note into view
   useEffect(() => {
