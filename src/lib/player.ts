@@ -3,6 +3,7 @@
 
 import { parseLuting, DRUM_SOUNDS } from './luting'
 import type { ScheduledNote } from './luting'
+import { getPlaybackMode, getBank, loadBank, scheduleSampled } from './samples'
 
 interface SynthConfig {
   wave: OscillatorType
@@ -425,6 +426,13 @@ export function playLuting(text: string, opts: PlayOptions = {}): PlayHandle {
   }
   queue.sort((a, b) => a.timeSec - b.timeSec)
 
+  // In Quality mode, make sure the packs for every instrument in this luting
+  // are loading. The rolling window re-checks getBank each tick, so a pack that
+  // finishes mid-playback upgrades the rest of the notes from synth to samples.
+  if (getPlaybackMode() === 'quality') {
+    for (const code of new Set(queue.map((n) => n.instrument))) void loadBank(code)
+  }
+
   // Schedule just-in-time in a rolling window. Creating every node upfront
   // chokes the audio thread on big songs (thousands of notes); a window keeps
   // the live node count bounded no matter how long the luting is.
@@ -441,6 +449,9 @@ export function playLuting(text: string, opts: PlayOptions = {}): PlayHandle {
         pan.connect(master)
         dest = pan
       }
+      const sampled =
+        getPlaybackMode() === 'quality' && getBank(n.instrument) && scheduleSampled(ctx, dest, n, t0)
+      if (sampled) continue
       if (n.drum) scheduleDrum(ctx, dest, n, t0)
       else scheduleMelodic(ctx, dest, n, t0)
     }

@@ -20,6 +20,9 @@ import {
   Volume2,
   Volume1,
   VolumeX,
+  Zap,
+  AudioWaveform,
+  Loader2,
 } from 'lucide-react'
 import { Library } from './components/Library'
 import { Credits } from './components/Credits'
@@ -27,6 +30,14 @@ import { Help } from './components/Help'
 import { saveSong, listSongs, newSongId, readLegacyLibrary, markLegacyMigrated } from './lib/library'
 import type { SavedSong } from './lib/library'
 import { parseLuting } from './lib/luting'
+import {
+  getPlaybackMode,
+  setPlaybackMode,
+  subscribePlaybackMode,
+  subscribeSampleLoading,
+  isLoadingSamples,
+  prewarm,
+} from './lib/samples'
 import logoUrl from './assets/conducting.webp'
 
 export interface VoiceUI {
@@ -89,6 +100,8 @@ export default function App() {
   const [justSaved, setJustSaved] = useState(false)
   const [volume, setVolume] = useState(() => getMasterVolume())
   const prevVolume = useRef(0.8)
+  const [playbackMode, setPlaybackModeState] = useState(() => getPlaybackMode())
+  const [samplesLoading, setSamplesLoading] = useState(false)
 
   const changeVolume = (v: number) => {
     setVolume(v)
@@ -102,6 +115,22 @@ export default function App() {
       changeVolume(prevVolume.current || 0.8)
     }
   }
+
+  const boardInstruments = () => voices.filter((v) => v.body.trim() !== '').map((v) => v.instrument)
+
+  const togglePlaybackMode = () => {
+    const next = playbackMode === 'quality' ? 'performance' : 'quality'
+    setPlaybackMode(next)
+    if (next === 'quality') prewarm(boardInstruments())
+  }
+
+  useEffect(() => subscribePlaybackMode(() => setPlaybackModeState(getPlaybackMode())), [])
+  useEffect(() => subscribeSampleLoading(() => setSamplesLoading(isLoadingSamples())), [])
+  // keep the current board's instrument packs warm while in Quality mode
+  useEffect(() => {
+    if (playbackMode === 'quality') prewarm(boardInstruments())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playbackMode, voices])
 
   // ESC stops whatever is playing and closes any dialog
   useEffect(() => {
@@ -335,6 +364,24 @@ export default function App() {
           {songName && <span className="song-name">{songName}</span>}
         </div>
         <div className="topbar-actions">
+          <button
+            className={`btn ${playbackMode === 'quality' ? 'active-btn' : ''}`}
+            data-tip={
+              playbackMode === 'quality'
+                ? 'Quality: real LuteBoi instrument samples (lazy-loaded). Click for the fast synth.'
+                : 'Performance: the instant built-in synth. Click for real instrument samples.'
+            }
+            onClick={togglePlaybackMode}
+          >
+            {samplesLoading ? (
+              <Loader2 size={15} className="spin" />
+            ) : playbackMode === 'quality' ? (
+              <AudioWaveform size={15} />
+            ) : (
+              <Zap size={15} />
+            )}
+            {playbackMode === 'quality' ? 'Quality' : 'Performance'}
+          </button>
           <div className="volume-control" data-tip="Volume for all sounds — click the icon to mute">
             <button className="icon-btn" aria-label="Mute" onClick={toggleMute}>
               {volume === 0 ? <VolumeX size={15} /> : volume < 0.5 ? <Volume1 size={15} /> : <Volume2 size={15} />}
