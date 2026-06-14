@@ -1,8 +1,9 @@
 // Real-sample playback, converted from LuteBoi's recorded multisample banks
 // (see tools/convert-samples.py). Packs are lazy-loaded per instrument and
 // decoded once; the engine pitch-shifts from the nearest sampled note and
-// loops the sustain region for long notes. Lute/Bass/Chiptune/Percussion have
-// no packs — LuteBoi synthesizes them too, so they always use our synth.
+// crossfade-loops the sustain region for long notes. Lute/Bass/Chiptune/
+// Percussion have no packs — LuteBoi synthesizes them too, so they always use
+// our synth.
 
 import type { ScheduledNote } from './luting'
 
@@ -38,10 +39,18 @@ export function subscribePlaybackMode(cb: () => void): () => void {
 
 // ---- bank loading ----------------------------------------------------------
 
+interface MelodicSample {
+  midi: number
+  buffer: AudioBuffer
+  /** crossfaded loop region (seconds), baked at decode time; only used if the bank loops */
+  loopStart: number
+  loopEnd: number
+}
+
 interface Bank {
   loop: boolean
   /** melodic notes, ascending by MIDI */
-  melodic: { midi: number; buffer: AudioBuffer }[]
+  melodic: MelodicSample[]
   /** drum sounds keyed by our DRUM_SOUNDS key (o0a, o3c, …) */
   drums: Record<string, AudioBuffer>
 }
@@ -70,6 +79,40 @@ function b64ToArrayBuffer(b64: string): ArrayBuffer {
   const bytes = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
   return bytes.buffer
+}
+
+/**
+ * Bake a click-free forward loop into a decoded sustain sample. A native
+ * AudioBufferSourceNode loop jumps instantly from loopEnd back to loopStart, so
+ * for a clean loop the samples arriving at loopEnd must lead smoothly into the
+ * samples at loopStart. We equal-power crossfade the tail of the loop (the
+ * samples just before loopEnd) toward the samples just before loopStart, so
+ * after the jump the waveform continues as if uninterrupted — continuous in
+ * both value and slope, with the amplitude difference between the two points
+ * smoothed across the fade rather than stepping (which pops). Pure ping-pong,
+ * like LuteBoi's offline renderer, is continuous in value but folds the
+ * waveform back on itself, leaving a slope corner that pops on a sustained
+ * real-time note; the crossfade avoids that. Mutates `buf` in place (the bank
+ * owns it) and returns the loop points in seconds.
+ */
+function bakeLoop(buf: AudioBuffer): { loopStart: number; loopEnd: number } {
+  const sr = buf.sampleRate
+  const len = buf.length
+  // Loop a stable slice of the sustain: clear of the attack and the decay tail.
+  const loopStart = Math.floor(len * 0.3)
+  const loopEnd = Math.floor(len * 0.85)
+  // Crossfade window, bounded by the headroom before loopStart and the loop length.
+  const xf = Math.max(0, Math.min(Math.floor(sr * 0.12), loopStart, loopEnd - loopStart - 1))
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch)
+    for (let k = 0; k < xf; k++) {
+      const w = (k + 0.5) / xf // 0 → 1 across the window
+      const tail = d[loopEnd - xf + k] // original loop tail, fading out
+      const head = d[loopStart - xf + k] // pre-loopStart content, fading in
+      d[loopEnd - xf + k] = tail * Math.cos((w * Math.PI) / 2) + head * Math.sin((w * Math.PI) / 2)
+    }
+  }
+  return { loopStart: loopStart / sr, loopEnd: loopEnd / sr }
 }
 
 function ensureIndex(): Promise<Set<string>> {
@@ -107,8 +150,10 @@ export function loadBank(code: string): Promise<Bank | null> {
       Object.entries(pack.notes).map(async ([key, b64]) => {
         try {
           const buf = await ctx.decodeAudioData(b64ToArrayBuffer(b64))
-          if (/^\d+$/.test(key)) melodic.push({ midi: parseInt(key, 10), buffer: buf })
-          else drums[key] = buf
+          if (/^\d+$/.test(key)) {
+            const lp = pack.loop ? bakeLoop(buf) : { loopStart: 0, loopEnd: 0 }
+            melodic.push({ midi: parseInt(key, 10), buffer: buf, ...lp })
+          } else drums[key] = buf
         } catch {
           /* skip a note that won't decode */
         }
@@ -175,8 +220,8 @@ export function scheduleSampled(ctx: AudioContext, dest: AudioNode, n: Scheduled
   const effectiveDur = best.buffer.duration / src.playbackRate.value
   if (bank.loop && effectiveDur < n.durSec + RELEASE) {
     src.loop = true
-    src.loopStart = best.buffer.duration * 0.25
-    src.loopEnd = best.buffer.duration * 0.95
+    src.loopStart = best.loopStart
+    src.loopEnd = best.loopEnd
   }
 
   const g = ctx.createGain()
