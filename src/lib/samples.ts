@@ -184,6 +184,13 @@ export function prewarm(codes: Iterable<string>) {
 
 const RELEASE = 0.08
 
+// Struck/plucked instruments keep ringing down after the attack instead of
+// holding a steady sustain. Holding their looped sample at full volume turns
+// the loop into a reverby drone, so we decay the gain at a fixed rate the way a
+// real string does. Keyed by instrument code → seconds to fall ~30 dB. (Only
+// the piano for now; bell/vibraphone/slap bass could join if they sound off.)
+const DECAY_SEC: Record<string, number> = { k: 2.2 }
+
 /**
  * Schedule a note from real samples. Returns false if no sample is available
  * (so the caller can fall back to the synth).
@@ -226,9 +233,21 @@ export function scheduleSampled(ctx: AudioContext, dest: AudioNode, n: Scheduled
 
   const g = ctx.createGain()
   const peak = n.volume * 0.8
+  const attackEnd = start + 0.005
   g.gain.setValueAtTime(0, start)
-  g.gain.linearRampToValueAtTime(peak, start + 0.005)
-  g.gain.setValueAtTime(peak, holdEnd)
+  g.gain.linearRampToValueAtTime(peak, attackEnd)
+  const decaySec = DECAY_SEC[n.instrument]
+  if (decaySec && peak > 0.0001) {
+    // Constant-rate ring-down (same dB/s regardless of note length), cut short
+    // if the note ends before it has fully decayed. A short note barely decays;
+    // a long one falls to a near-silent tail, so the loop never drones.
+    const decayHit = Math.min(attackEnd + decaySec, holdEnd)
+    const target = Math.max(peak * Math.pow(0.03, (decayHit - attackEnd) / decaySec), 0.0001)
+    g.gain.exponentialRampToValueAtTime(target, decayHit)
+    g.gain.setValueAtTime(target, holdEnd)
+  } else {
+    g.gain.setValueAtTime(peak, holdEnd)
+  }
   g.gain.linearRampToValueAtTime(0, holdEnd + RELEASE)
   src.connect(g)
   g.connect(dest)
