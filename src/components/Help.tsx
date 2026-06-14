@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { INSTRUMENTS, DRUM_SOUNDS } from '../lib/luting'
 import { highlightLuting } from '../lib/lutingLang'
+import { useBackdropClose } from '../lib/useBackdropClose'
 
 interface Props {
   open: boolean
@@ -342,14 +343,10 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function Help({ open, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('studio')
+  const backdrop = useBackdropClose(onClose)
   if (!open) return null
   return (
-    <div
-      className="modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
+    <div className="modal-backdrop" {...backdrop}>
       <div className="modal modal-wide modal-help" role="dialog" aria-modal="true" aria-label="Help">
         <div className="modal-head">
           <span className="panel-title">Help</span>

@@ -6,6 +6,7 @@ import { listSongs, saveSong, deleteSong, newSongId } from '../lib/library'
 import type { SavedSong } from '../lib/library'
 import type { VoiceUI } from '../App'
 import { parseLuting, instrumentByCode } from '../lib/luting'
+import { useBackdropClose } from '../lib/useBackdropClose'
 import { Save, FolderOpen, Trash2, Copy, X, Music2 } from 'lucide-react'
 
 interface Props {
@@ -40,6 +41,8 @@ export function Library({ open, onClose, bpm, voices, luting, songName, currentS
     setDeleteArm(null)
     listSongs().then(setSongs).catch((e) => setError(`Could not open the library: ${e}`))
   }, [open, songName])
+
+  const backdrop = useBackdropClose(onClose)
 
   if (!open) return null
 
@@ -79,12 +82,7 @@ export function Library({ open, onClose, bpm, voices, luting, songName, currentS
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
+    <div className="modal-backdrop" {...backdrop}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Song library">
         <div className="modal-head">
           <span className="panel-title">Library</span>

@@ -1,6 +1,7 @@
 // Credits: the people and projects this app is built on.
 
 import { ExternalLink, X } from 'lucide-react'
+import { useBackdropClose } from '../lib/useBackdropClose'
 
 interface Props {
   open: boolean
@@ -81,14 +82,10 @@ function CreditList({ title, credits }: { title: string; credits: Credit[] }) {
 }
 
 export function Credits({ open, onClose }: Props) {
+  const backdrop = useBackdropClose(onClose)
   if (!open) return null
   return (
-    <div
-      className="modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
+    <div className="modal-backdrop" {...backdrop}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Credits">
         <div className="modal-head">
           <span className="panel-title">Credits</span>

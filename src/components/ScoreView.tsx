@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ParseResult } from '../lib/luting'
 import { scheduledToRollNotes } from '../lib/transform'
 import { midiToPitch } from '../lib/luting'
+import { useBackdropClose } from '../lib/useBackdropClose'
 import type { Lane } from './Timeline'
 import { X, Loader2 } from 'lucide-react'
 
@@ -281,15 +282,12 @@ export function ScoreView({ open, onClose, parsed, lanes }: Props) {
     }
   }, [open, vf, parsed, lanes])
 
+  const backdrop = useBackdropClose(onClose)
+
   if (!open) return null
 
   return (
-    <div
-      className="modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
+    <div className="modal-backdrop" {...backdrop}>
       <div className="modal modal-score" role="dialog" aria-modal="true" aria-label="Score">
         <div className="modal-head">
           <span className="panel-title">Score</span>

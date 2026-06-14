@@ -15,6 +15,7 @@ import { playLuting, stopPlayback, getPlaybackInfo } from '../lib/player'
 import { useActivePlayback } from '../lib/usePlayback'
 import { INSTRUMENT_MIME } from './InstrumentPalette'
 import { NumberInput } from './NumberInput'
+import { useBackdropClose } from '../lib/useBackdropClose'
 
 const VOICE_MIME = 'application/x-luting-voice'
 
@@ -34,6 +35,7 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax }: Props
   // id of the voice awaiting a remove confirmation, or null when the dialog is closed
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const confirmVoice = voices.find((v) => v.id === confirmId) ?? null
+  const confirmBackdrop = useBackdropClose(() => setConfirmId(null))
 
   const update = (id: string, patch: Partial<VoiceUI>) =>
     setVoices((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)))
@@ -202,12 +204,7 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax }: Props
       </div>
 
       {confirmVoice && (
-        <div
-          className="modal-backdrop"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setConfirmId(null)
-          }}
-        >
+        <div className="modal-backdrop" {...confirmBackdrop}>
           <div className="modal modal-confirm" role="alertdialog" aria-modal="true" aria-label="Remove voice">
             <div className="modal-head">
               <span className="panel-title">Remove voice?</span>
