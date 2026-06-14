@@ -198,10 +198,8 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
     seekTo(e.clientX)
   }
   const onPointerMove = (e: ReactPointerEvent) => {
-    if (trim) {
-      setHoverSec(secAt(e.clientX))
-      return
-    }
+    setHoverSec(secAt(e.clientX))
+    if (trim) return
     if (dragging.current && Date.now() - lastSeek.current > 250) seekTo(e.clientX)
   }
   const onPointerUp = (e: ReactPointerEvent) => {
@@ -215,6 +213,11 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
   const dur = parsed.durationSec || 1
   const startCut = trim ? (trim.startSec ?? (trim.picking === 'start' ? hoverSec : null)) : null
   const endCut = trim ? (trim.endSec ?? (trim.picking === 'end' ? hoverSec : null)) : null
+
+  // seek guide: where a click would start playback, with the time, while hovering
+  const showHover = !trim && hoverSec !== null
+  const hoverFrac = showHover ? Math.max(0, Math.min(1, hoverSec! / dur)) : 0
+  const hoverTx = hoverFrac < 0.06 ? '0' : hoverFrac > 0.94 ? '-100%' : '-50%'
 
   return (
     <div className="timeline">
@@ -239,6 +242,13 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
         <canvas ref={baseRef} className="timeline-canvas" />
         <canvas ref={hlRef} className="timeline-canvas timeline-hl" />
         <div ref={playheadRef} className="playhead" />
+        {showHover && (
+          <div className="timeline-hover" style={{ left: `${hoverFrac * 100}%` }}>
+            <span className="timeline-hover-time" style={{ transform: `translateX(${hoverTx})` }}>
+              {hoverSec!.toFixed(1)}s
+            </span>
+          </div>
+        )}
         {startCut !== null && startCut > 0.005 && (
           <div className="trim-shade start" style={{ left: 0, width: `${(Math.min(startCut, dur) / dur) * 100}%` }}>
             <span>−{startCut.toFixed(1)}s</span>
