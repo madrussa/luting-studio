@@ -7,7 +7,7 @@ import type { SavedSong } from '../lib/library'
 import type { VoiceUI } from '../App'
 import { parseLuting, instrumentByCode } from '../lib/luting'
 import { useBackdropClose } from '../lib/useBackdropClose'
-import { Save, FolderOpen, Trash2, Copy, X, Music2 } from 'lucide-react'
+import { Save, FolderOpen, Trash2, Copy, X, Music2, Search } from 'lucide-react'
 
 interface Props {
   open: boolean
@@ -34,11 +34,13 @@ export function Library({ open, onClose, bpm, voices, luting, songName, currentS
   const [name, setName] = useState(songName)
   const [deleteArm, setDeleteArm] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
     if (!open) return
     setName(songName || 'Untitled luting')
     setDeleteArm(null)
+    setQuery('')
     listSongs().then(setSongs).catch((e) => setError(`Could not open the library: ${e}`))
   }, [open, songName])
 
@@ -81,6 +83,9 @@ export function Library({ open, onClose, bpm, voices, luting, songName, currentS
     setSongs(await listSongs())
   }
 
+  const q = query.trim().toLowerCase()
+  const filtered = q ? songs.filter((s) => s.name.toLowerCase().includes(q)) : songs
+
   return (
     <div className="modal-backdrop" {...backdrop}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Song library">
@@ -113,9 +118,30 @@ export function Library({ open, onClose, bpm, voices, luting, songName, currentS
         <div className="lib-hint">Loading a song replaces the current board — save your work first.</div>
         {error && <div className="warning error">{error}</div>}
 
+        {songs.length > 0 && (
+          <div className="lib-search">
+            <Search size={14} className="lib-search-icon" />
+            <input
+              className="lib-search-input"
+              value={query}
+              placeholder="Search saved lutings"
+              aria-label="Search saved lutings"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query && (
+              <button className="icon-btn" aria-label="Clear search" data-tip="Clear search" onClick={() => setQuery('')}>
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="lib-list">
           {songs.length === 0 && <div className="lib-empty">No saved lutings yet — name the current board above and save it.</div>}
-          {songs.map((s) => (
+          {songs.length > 0 && filtered.length === 0 && (
+            <div className="lib-empty">No lutings match “{query.trim()}”.</div>
+          )}
+          {filtered.map((s) => (
             <div key={s.id} className={`lib-row ${s.id === currentSongId ? 'current' : ''}`}>
               <span className="lib-icons">
                 {[...new Set(s.voices.map((v) => v.instrument))].slice(0, 5).map((c, i) => (
