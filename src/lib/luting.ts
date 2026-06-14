@@ -41,9 +41,20 @@ export const TWITCH_LIMIT = 493
 // Pitch math. o4 c = middle C = MIDI 60. Letters run c..b within an octave.
 // Flats are written with a trailing apostrophe: d' = C#/Db.
 
-const LETTER_ORDER = ['c', 'd', 'e', 'f', 'g', 'a', 'b'] as const
 const LETTER_SEMITONE: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }
 const PC_TO_TOKEN = ['c', "d'", 'd', "e'", 'e', 'f', "g'", 'g', "a'", 'a', "b'", 'b']
+
+// The chromatic order luteboi uses inside a chord: notes are assumed to ascend,
+// and the implied octave rolls over whenever the next note isn't above the
+// previous one. A flat sits one step *below* its natural (e' below e), so a
+// run like e' e g keeps climbing and stays in one octave. Mirrors LuteBoi's
+// NOTE_ORDER table exactly — comparing letters alone would treat e' and e as
+// equal and wrongly roll the octave (emitting a stray '<').
+const NOTE_ORDER: Record<string, number> = {
+  c: 0, "d'": 1, d: 2, "e'": 3, e: 4, "f'": 5, f: 6,
+  "g'": 7, g: 8, "a'": 9, a: 10, "b'": 11, b: 12, "c'": 13,
+}
+const noteOrder = (letter: string) => NOTE_ORDER[letter] ?? 0
 
 export interface Pitch {
   octave: number
@@ -68,7 +79,6 @@ export function clampMidi(midi: number): number {
   return m
 }
 
-const letterIdx = (letter: string) => LETTER_ORDER.indexOf(letter[0] as (typeof LETTER_ORDER)[number])
 
 // ---------------------------------------------------------------------------
 // Voice events -> luting body text.
@@ -145,10 +155,10 @@ export function serializeVoiceBody(events: VoiceEvent[], opts: SerializeOptions 
     let impliedOct = pitches[0].octave
     let prev = pitches[0]
     for (const p of pitches.slice(1)) {
-      // luteboi bumps the implied octave when the next letter isn't strictly
-      // above the previous one; flats share a letter (d' then d), so the bump
-      // can overshoot — '<' brings it back down, '>' covers larger jumps up.
-      let implied = impliedOct + (letterIdx(p.letter) <= letterIdx(prev.letter) ? 1 : 0)
+      // luteboi bumps the implied octave when the next note isn't above the
+      // previous one in NOTE_ORDER (so e' -> e ascends and stays put; e -> e'
+      // or a wrap like b -> c rolls over). '>' covers larger jumps up.
+      let implied = impliedOct + (noteOrder(p.letter) <= noteOrder(prev.letter) ? 1 : 0)
       while (implied < p.octave) {
         out += '>'
         implied++
@@ -476,11 +486,18 @@ export function parseLuting(input: string, opts: ParseOptions = {}): ParseResult
           oct = 4
         }
       } else if (ch === '>') {
-        oct++
+        // '>' up an octave, '>N' up N octaves (luteboi clamps to o8)
         i++
+        if (voice[i] >= '0' && voice[i] <= '9') {
+          oct = Math.min(8, oct + parseInt(voice[i], 10))
+          i++
+        } else oct++
       } else if (ch === '<') {
-        oct--
         i++
+        if (voice[i] >= '0' && voice[i] <= '9') {
+          oct = Math.max(0, oct - parseInt(voice[i], 10))
+          i++
+        } else oct--
       } else if (ch === 't') {
         i++
         const f = readFraction(voice, i)
@@ -535,11 +552,19 @@ export function parseLuting(input: string, opts: ParseOptions = {}): ParseResult
         while (i < voice.length && voice[i] !== ')') {
           const c = voice[i]
           if (c === '>') {
-            chordOct++
+            // '>' / '>N' raise the chord's running octave (luteboi: notes after
+            // it land N octaves up)
             i++
+            if (voice[i] >= '0' && voice[i] <= '9') {
+              chordOct += parseInt(voice[i], 10)
+              i++
+            } else chordOct++
           } else if (c === '<') {
-            chordOct--
             i++
+            if (voice[i] >= '0' && voice[i] <= '9') {
+              chordOct -= parseInt(voice[i], 10)
+              i++
+            } else chordOct--
           } else if (c >= 'a' && c <= 'g') {
             let letter = c
             i++
@@ -547,7 +572,7 @@ export function parseLuting(input: string, opts: ParseOptions = {}): ParseResult
               letter += "'"
               i++
             }
-            if (prevLetter !== null && letterIdx(letter) <= letterIdx(prevLetter)) chordOct++
+            if (prevLetter !== null && noteOrder(letter) <= noteOrder(prevLetter)) chordOct++
             pitches.push({ octave: chordOct, letter })
             prevLetter = letter
           } else {
