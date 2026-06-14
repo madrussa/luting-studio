@@ -200,6 +200,27 @@ export function PianoRoll({
       for (let p = 9; p >= idx; p -= 2) line(p)
     }
 
+    // A chord (notes sharing a start) takes ONE stem direction so its stems
+    // don't splay both ways. Set by the notes furthest from the staff's middle
+    // line, the standard rule; reduces to the per-note rule for a lone note.
+    const chordStemUp = new Map<number, boolean>()
+    {
+      const ext = new Map<number, { top: number; bottom: number }>()
+      for (const n of derived.notes) {
+        if (n.midi === undefined || hiddenForMove(n)) continue
+        const { idx } = staffIndex(n.midi)
+        const e = ext.get(n.start)
+        if (e) {
+          e.top = Math.max(e.top, idx)
+          e.bottom = Math.min(e.bottom, idx)
+        } else ext.set(n.start, { top: idx, bottom: idx })
+      }
+      for (const [start, { top, bottom }] of ext) {
+        const mid = bottom >= 21 ? 27 : top < 21 ? 15 : 21
+        chordStemUp.set(start, mid - bottom > top - mid)
+      }
+    }
+
     for (const n of derived.notes) {
       if (n.midi === undefined) continue
       if (hiddenForMove(n)) continue
@@ -231,7 +252,7 @@ export function PianoRoll({
         ctx.strokeStyle = color
         ctx.lineWidth = 1.2
         ctx.beginPath()
-        const stemUp = idx < (idx >= 21 ? 27 : 15)
+        const stemUp = chordStemUp.get(n.start) ?? idx < (idx >= 21 ? 27 : 15)
         if (stemUp) {
           ctx.moveTo(x + 8.2, y - 1)
           ctx.lineTo(x + 8.2, y - 19)
