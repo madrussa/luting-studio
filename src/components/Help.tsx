@@ -30,10 +30,11 @@ function StudioHelp() {
       <div className="help-section">
         <div className="help-title">The board</div>
         <ul className="help-list">
-          <li><strong>Drag an instrument</strong> from the palette onto the board to add a voice; drop it <strong>onto an existing voice</strong> to swap its instrument. Click a palette chip to hear it.</li>
+          <li><strong>Drag an instrument</strong> from the palette anywhere onto the board to add a voice — a line shows where it'll land. Drop it on a <strong>voice's center</strong> to swap that voice's instrument instead. Click a palette chip to hear it.</li>
           <li>Voices play simultaneously, joined with <code>|</code> in the output. Drag the grip handle to reorder them — careful with reordering if voices share macros.</li>
           <li>Each card: <strong>solo play</strong>, <strong>mute</strong> (drops the voice from the luting entirely — handy for trimming toward the Twitch limit), <strong>note editor</strong>, and <strong>remove</strong>. The name field is free text.</li>
           <li>The thin strip under each header is that voice's timeline — <strong>click or drag it to solo-play from that point</strong>.</li>
+          <li><strong>Undo / redo</strong> the last 20 board changes — notes, BPM, instrument swaps, mutes, reorders, even an import or trim. Use the buttons above the instrument palette, or <Key k="Ctrl" />/<Key k="⌘" /> + <Key k="Z" /> and <Key k="Ctrl" />/<Key k="⌘" /> + <Key k="Shift" /> + <Key k="Z" />. The buffer is saved in this browser, so it survives a reload; typing in a text box uses that box's own undo.</li>
         </ul>
       </div>
 
@@ -41,6 +42,9 @@ function StudioHelp() {
         <div className="help-title">The note editor (piano roll)</div>
         <ul className="help-list">
           <li><strong>Click an empty cell</strong> to add a note at the selected length; <strong>click a note</strong> to remove it. Stack notes in the same column to build chords. Drumkit voices show one row per drum sound.</li>
+          <li><strong>Drag a box</strong> over notes to select them (<Key k="Shift" />+drag adds to the selection), then <Key k="Ctrl" />/<Key k="⌘" /> + <Key k="C" />/<Key k="X" />/<Key k="V" /> to copy / cut / paste and <Key k="Delete" /> to remove them. Paste lands at the cursor (same pitches), or after the last note when the pointer's off the grid; it won't overlap existing notes. <Key k="Ctrl" />/<Key k="⌘" /> + <Key k="A" /> selects the whole voice; <Key k="Esc" /> clears the selection.</li>
+          <li><strong>Move a selection</strong> by dragging any selected note, or nudge it with the <strong>arrow keys</strong> — ←/→ by a unit, ↑/↓ by a semitone (a staff step), and <Key k="Shift" /> for a whole beat or octave. A move that would collide or run off the grid is refused.</li>
+          <li>Copies also go to your <strong>system clipboard</strong> as plain luting text, so you can paste a phrase into luteboi.com or notes — and paste luting text from elsewhere straight onto the grid. Within the app the clipboard is shared across voices.</li>
           <li>If you read music, switch the editor to <strong>staff view</strong> (the toolbar toggle) — a grand staff with clefs, ledger lines and accidentals. Click a line or space to add a note; <Key k="Shift" />+click writes it as a <strong>flat</strong>. The view choice is shared by all editors.</li>
           <li><Key k="Ctrl" />/<Key k="⌘" /> + <strong>mouse wheel</strong> (or trackpad pinch) zooms, anchored at the cursor. Zoom and horizontal scroll are <strong>shared across all open editors</strong> so voices stay aligned; <strong>Fit</strong> shows the whole track.</li>
           <li>Drag the <strong>bar-number ruler</strong> to scrub solo playback; the playhead sweeps the grid and notes flash as they sound.</li>
@@ -83,6 +87,11 @@ function StudioHelp() {
         <ul className="help-list">
           <li><Key k="Esc" /> — stop playback / close dialogs</li>
           <li><Key k="Ctrl" />/<Key k="⌘" /> + <Key k="S" /> — save to library</li>
+          <li><Key k="Ctrl" />/<Key k="⌘" /> + <Key k="Z" /> — undo</li>
+          <li><Key k="Ctrl" />/<Key k="⌘" /> + <Key k="Shift" /> + <Key k="Z" /> (or <Key k="Ctrl" /> + <Key k="Y" />) — redo</li>
+          <li><Key k="Ctrl" />/<Key k="⌘" /> + <Key k="C" /> / <Key k="X" /> / <Key k="V" /> — copy / cut / paste roll selection</li>
+          <li><Key k="Ctrl" />/<Key k="⌘" /> + <Key k="A" /> · <Key k="Delete" /> — select all / delete (in the note editor)</li>
+          <li>Arrow keys — move the roll selection (<Key k="Shift" /> = beat / octave)</li>
           <li><Key k="Ctrl" />/<Key k="⌘" /> + wheel — zoom editors (over an editor)</li>
           <li><Key k="Shift" /> + click ▲/▼ — transpose an octave</li>
           <li><Key k="Enter" /> in the paste box — import</li>

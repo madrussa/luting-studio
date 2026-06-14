@@ -211,6 +211,23 @@ body {
   align-items: center;
   justify-content: space-between;
 }
+.modal-confirm {
+  width: min(440px, 94vw);
+}
+.confirm-body {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.confirm-body strong {
+  color: var(--text);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .song-name {
   color: var(--accent-2);
   font-size: 13px;
@@ -643,6 +660,13 @@ body {
   max-height: calc(100vh - 24px);
   overflow-y: auto;
 }
+.history-controls {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
 .palette-grid {
   margin-top: 12px;
   display: grid;
@@ -724,21 +748,23 @@ body {
   color: var(--text-dim);
 }
 .bpm-control input {
-  width: 76px;
-}
-.bpm-hint {
-  font-size: 11px;
+  width: 56px;
 }
 
 .voice-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 140px;
+  /* grow to fill the board so the empty area below the cards is part of the
+     drop target (insert-at-end), not dead board space */
+  flex: 1 1 auto;
+  min-height: 200px;
   max-height: calc(100vh - 200px);
   overflow-y: auto;
   border-radius: 10px;
-  padding: 4px;
+  /* roomy top/bottom padding gives a comfortable insert-before-first /
+     insert-after-last target */
+  padding: 16px 6px;
   transition: background 0.15s, outline 0.15s;
   outline: 2px dashed transparent;
 }
@@ -751,6 +777,14 @@ body {
   text-align: center;
   padding: 40px 0;
   font-size: 15px;
+}
+/* insertion preview: a glowing line in the gap where a voice will land */
+.drop-line {
+  height: 3px;
+  margin: -4px 2px;
+  border-radius: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
 }
 
 .voice-card {
@@ -765,6 +799,7 @@ body {
 }
 .voice-card.drag-over {
   border-color: var(--accent-2);
+  box-shadow: 0 0 0 1px var(--accent-2), 0 0 12px rgba(90, 209, 179, 0.35);
 }
 .voice-card.muted {
   opacity: 0.55;
@@ -852,6 +887,16 @@ body {
   flex-direction: column;
   gap: 6px;
 }
+.roll:focus {
+  outline: none;
+}
+.roll-marquee {
+  position: absolute;
+  z-index: 3;
+  border: 1px solid var(--accent-2);
+  background: rgba(90, 209, 179, 0.12);
+  pointer-events: none;
+}
 .roll-toolbar {
   display: flex;
   align-items: center;
@@ -864,6 +909,9 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.note-len-input {
+  width: 42px;
 }
 .roll-hint {
   font-size: 11px;
@@ -1263,6 +1311,70 @@ select:focus {
   border-color: var(--accent);
 }
 
+/* themed number field (NumberInput) — hides the native spinner, adds steppers */
+.num-input {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+.num-input:focus-within {
+  border-color: var(--accent);
+}
+.num-input.disabled {
+  opacity: 0.5;
+}
+.num-input input {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 5px 4px 5px 8px;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.num-input input:focus {
+  border: none;
+}
+.num-input input::-webkit-outer-spin-button,
+.num-input input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.num-steppers {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 18px;
+  border-left: 1px solid var(--border);
+}
+.num-step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.num-step:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.num-step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.num-step + .num-step {
+  border-top: 1px solid var(--border);
+}
+
 select {
   appearance: none;
   padding-right: 28px;
@@ -1307,6 +1419,16 @@ select {
 .btn.primary:hover {
   background: #ae91ff;
 }
+.btn.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.btn.danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: var(--danger);
+}
 
 .icon-btn {
   display: inline-flex;
@@ -1325,6 +1447,14 @@ select {
 .icon-btn:hover {
   color: var(--text);
   border-color: var(--accent);
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.icon-btn:disabled:hover {
+  color: var(--text-dim);
+  border-color: var(--border);
 }
 .icon-btn.active {
   color: var(--accent-2);

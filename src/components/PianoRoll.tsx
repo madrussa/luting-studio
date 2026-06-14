@@ -10,23 +10,25 @@
 // only the visible slice is drawn, so long tracks at any zoom stay cheap.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
-import { serializeVoiceBody, midiToPitch, DRUM_SOUNDS } from '../lib/luting'
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { serializeVoiceBody, midiToPitch, DRUM_SOUNDS, parseLuting } from '../lib/luting'
 import type { ScheduledNote } from '../lib/luting'
 import { notesToEvents, dominantVolume, scheduledToRollNotes } from '../lib/transform'
 import type { RollNote } from '../lib/transform'
+import { getClip, setClip, writeSystem, getLastSysText } from '../lib/rollClipboard'
 import { playLuting, getPlaybackInfo } from '../lib/player'
 import { useActivePlayback } from '../lib/usePlayback'
 import { useRollView, setRollView, getRollView, clampZoom } from '../lib/rollView'
 import { useTheme, canvasColors } from '../lib/theme'
 import { instrumentColor } from './Timeline'
 import { Minus, Plus, TriangleAlert, LayoutGrid, Music } from 'lucide-react'
+import { NumberInput } from './NumberInput'
 
 const MIDI_MAX = 107 // b7
 const MIDI_MIN = 24 // c1
 const MELODIC_ROWS = MIDI_MAX - MIDI_MIN + 1
 const DRUM_KEYS = Object.keys(DRUM_SOUNDS)
-const NOTE_LENGTHS = [1, 2, 3, 4, 6, 8, 12, 16]
+const NOTE_LEN_MAX = 64
 const GUTTER = 52
 const RULER = 16
 
@@ -87,8 +89,23 @@ export function PianoRoll({
   const H = mode === 'staff' ? STAFF_H : rows * rowH
 
   const [noteLen, setNoteLen] = useState(4)
-  const [flash, setFlash] = useState<string | null>(null)
+  const [flash, setFlash] = useState<{ text: string; warn: boolean } | null>(null)
+  const flashTimer = useRef(0)
   const [viewW, setViewW] = useState(600)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const [moveDelta, setMoveDelta] = useState<{ du: number; dv: number } | null>(null)
+  const drag = useRef<{
+    x: number
+    y: number
+    u: number
+    pos: number
+    moved: boolean
+    kind: 'marquee' | 'move'
+    hitKey: string | null
+    keys: Set<string>
+  } | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -115,6 +132,11 @@ export function PianoRoll({
   )
 
   const rowForNote = (n: RollNote) => (isDrum ? DRUM_KEYS.indexOf(n.drum!) : MIDI_MAX - (n.midi ?? 60))
+  // stable identity for selection (two notes can't share start+dur+pitch)
+  const noteKey = (n: RollNote) => `${n.start}:${n.dur}:${n.midi ?? 'd' + n.drum}`
+  // during a drag-move the selected notes are drawn shifted in the overlay, so
+  // hide them at their original spot
+  const hiddenForMove = (n: RollNote) => moveDelta != null && selected.has(noteKey(n))
   const yForIdx = (idx: number) => STAFF_PAD + (DIATONIC_MAX - idx) * STEP
 
   /** geometry of a note for overlays (spotlight, playback flash), per mode */
@@ -180,6 +202,7 @@ export function PianoRoll({
 
     for (const n of derived.notes) {
       if (n.midi === undefined) continue
+      if (hiddenForMove(n)) continue
       const x = n.start * pxPerUnit
       const w = Math.max(2, n.dur * pxPerUnit - 1)
       if (x + w < offset || x > offset + cw) continue
@@ -268,6 +291,7 @@ export function PianoRoll({
     }
     ctx.fillStyle = instrumentColor(instrument)
     for (const n of derived.notes) {
+      if (hiddenForMove(n)) continue
       const x = n.start * pxPerUnit
       const w = Math.max(2, n.dur * pxPerUnit - 1)
       if (x + w < offset || x > offset + cw) continue
@@ -326,6 +350,29 @@ export function PianoRoll({
         ctx.strokeRect(r.x - 1, r.y - 0.5, r.w + 2.5, r.h + 1)
       }
       ctx.shadowBlur = 0
+    }
+
+    // selected notes: translucent fill (grid) + solid outline, shifted live
+    // by the current drag/arrow move delta
+    if (selected.size) {
+      const col = canvasColors()
+      const dx = moveDelta ? moveDelta.du * pxPerUnit : 0
+      const dy = moveDelta ? moveDelta.dv * (mode === 'staff' ? STEP : rowH) : 0
+      for (const n of derived.notes) {
+        if (!selected.has(noteKey(n))) continue
+        const r = noteRect(n)
+        if (!r) continue
+        const x = r.x + dx
+        const y = r.y + dy
+        if (x + r.w < offset || x > offset + cw) continue
+        if (mode === 'grid') {
+          ctx.fillStyle = col.selFill
+          ctx.fillRect(x + 0.5, y, r.w, r.h)
+        }
+        ctx.strokeStyle = col.sel
+        ctx.lineWidth = 1.5
+        ctx.strokeRect(x - 0.5, y - 0.5, r.w + 1.5, r.h + 1)
+      }
     }
   }
   drawRef.current = draw
@@ -501,18 +548,26 @@ export function PianoRoll({
     playLuting(mini, { id: 'audition' })
   }
 
-  const warn = (msg: string) => {
-    setFlash(msg)
-    setTimeout(() => setFlash(null), 2200)
+  const showFlash = (text: string, isWarn: boolean) => {
+    setFlash({ text, warn: isWarn })
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setFlash(null), 2200)
   }
+  const warn = (msg: string) => showFlash(msg, true)
+  const info = (msg: string) => showFlash(msg, false)
 
-  const onClick = (e: ReactMouseEvent) => {
-    const { u, pos } = locate(e)
-    const hit = derived.notes.find((n) => {
+  // the note under a grid position, if any
+  const hitNoteAt = (u: number, pos: number) =>
+    derived.notes.find((n) => {
       if (u < n.start || u >= n.start + n.dur) return false
       if (mode === 'staff') return n.midi !== undefined && staffIndex(n.midi).idx === pos
       return rowForNote(n) === pos
     })
+
+  // a single click on the grid: remove the note under it, else add one
+  const addOrRemoveAt = (u: number, pos: number, shiftKey: boolean) => {
+    setSelected(new Set())
+    const hit = hitNoteAt(u, pos)
     if (hit) {
       commit(derived.notes.filter((n) => n !== hit))
       return
@@ -521,7 +576,7 @@ export function PianoRoll({
     if (isDrum) {
       note = { start: u, dur: 1, drum: DRUM_KEYS[pos] }
     } else if (mode === 'staff') {
-      const midi = midiForIdx(pos, e.shiftKey)
+      const midi = midiForIdx(pos, shiftKey)
       if (midi < MIDI_MIN || midi > MIDI_MAX) {
         warn('That position is outside the playable o1–o7 range.')
         return
@@ -547,6 +602,289 @@ export function PianoRoll({
     }
     audition(note)
     commit([...derived.notes, note])
+  }
+
+  // ---- selection, marquee & clipboard --------------------------------------
+
+  const selectedNotes = () => derived.notes.filter((n) => selected.has(noteKey(n)))
+  const plural = (n: number) => `${n} note${n === 1 ? '' : 's'}`
+
+  const finalizeMarquee = (r: { x0: number; y0: number; x1: number; y1: number }, additive: boolean) => {
+    const xMin = Math.min(r.x0, r.x1)
+    const xMax = Math.max(r.x0, r.x1)
+    const yMin = Math.min(r.y0, r.y1)
+    const yMax = Math.max(r.y0, r.y1)
+    const hits = new Set<string>(additive ? selected : [])
+    for (const n of derived.notes) {
+      const rect = noteRect(n)
+      if (!rect) continue
+      if (rect.x + rect.w < xMin || rect.x > xMax || rect.y + rect.h < yMin || rect.y > yMax) continue
+      hits.add(noteKey(n))
+    }
+    setSelected(hits)
+  }
+
+  // write a selection to both the internal clipboard and (as luting text) the
+  // system clipboard
+  const writeClip = (sel: RollNote[]) => {
+    const minStart = Math.min(...sel.map((n) => n.start))
+    const rel = sel.map((n) => ({ ...n, start: n.start - minStart }))
+    setClip(rel, isDrum)
+    writeSystem(serializeVoiceBody(notesToEvents(rel, isDrum), { volume: derived.volume }))
+  }
+
+  const copySelection = () => {
+    const sel = selectedNotes()
+    if (!sel.length) return
+    writeClip(sel)
+    info(`Copied ${plural(sel.length)}`)
+  }
+
+  const deleteSelection = () => {
+    const sel = selectedNotes()
+    if (!sel.length) return
+    setSelected(new Set())
+    commit(derived.notes.filter((n) => !selected.has(noteKey(n))))
+  }
+
+  const cutSelection = () => {
+    const sel = selectedNotes()
+    if (!sel.length) return
+    writeClip(sel)
+    setSelected(new Set())
+    commit(derived.notes.filter((n) => !selected.has(noteKey(n))))
+    info(`Cut ${plural(sel.length)}`)
+  }
+
+  // normalize a note list so its earliest start is 0
+  const relativize = (notes: RollNote[]): RollNote[] => {
+    const minStart = Math.min(...notes.map((n) => n.start))
+    return notes.map((n) => ({ ...n, start: n.start - minStart }))
+  }
+
+  // parse system-clipboard text as a voice body (or a full luting) into notes
+  // for this voice
+  const parseSnippet = (text: string): RollNote[] | null => {
+    const clean = text.trim()
+    if (!clean) return null
+    try {
+      const full = clean.startsWith('#lute') ? clean : `#lute ${bpm} i${isDrum ? 'd' : instrument}${clean.replace(/\s+/g, '')}`
+      const parsed = parseLuting(full)
+      const v0 = parsed.notes.filter((n) => n.voice === 0)
+      if (!v0.length) return null
+      return relativize(scheduledToRollNotes(v0, parsed.bpm))
+    } catch {
+      return null
+    }
+  }
+
+  // drop a block of notes at `target`, respecting the sequential/chord rule
+  const placeNotes = (notes: RollNote[], target: number) => {
+    const pasted = notes.map((n) => ({ ...n, start: n.start + target }))
+    for (const p of pasted) {
+      const clash = derived.notes.filter((m) => p.start < m.start + m.dur && m.start < p.start + p.dur)
+      const cleanChord = clash.every((m) => m.start === p.start && m.dur === p.dur)
+      if (clash.length && (isDrum || !cleanChord)) {
+        warn('Paste would overlap existing notes — drop it on empty space or after the end.')
+        return
+      }
+    }
+    commit([...derived.notes, ...pasted])
+    setSelected(new Set(pasted.map(noteKey)))
+    info(`Pasted ${plural(pasted.length)}`)
+  }
+
+  const pasteClip = async () => {
+    // anchor at the hovered time, else append after the last note
+    const target = hover.current ? hover.current.u : derived.notes.reduce((m, n) => Math.max(m, n.start + n.dur), 0)
+    // foreign system-clipboard text wins; otherwise our own internal clip
+    let sys: string | null = null
+    try {
+      sys = await navigator.clipboard?.readText()
+    } catch {
+      sys = null
+    }
+    if (sys && sys.trim() && sys !== getLastSysText()) {
+      const notes = parseSnippet(sys)
+      if (notes) {
+        placeNotes(notes, target)
+        return
+      }
+    }
+    const clip = getClip()
+    if (clip && clip.notes.length) {
+      if (clip.isDrum !== isDrum) {
+        warn(clip.isDrum ? 'Clipboard has drum hits — paste into a Drumkit voice.' : 'Clipboard has melodic notes — paste into a melodic voice.')
+        return
+      }
+      placeNotes(clip.notes, target)
+      return
+    }
+    // nothing internal, but the system clipboard had something parseable
+    if (sys && sys.trim()) {
+      const notes = parseSnippet(sys)
+      if (notes) placeNotes(notes, target)
+    }
+  }
+
+  // shift the selection by du grid units and dv vertical steps (rows in grid,
+  // diatonic steps in staff); used by both drag-move and the arrow keys
+  const applyMove = (du: number, dv: number, keysOverride?: Set<string>) => {
+    const keys = keysOverride ?? selected
+    const sel = derived.notes.filter((n) => keys.has(noteKey(n)))
+    if (!sel.length) return
+    const minStart = Math.min(...sel.map((n) => n.start))
+    if (minStart + du < 0) du = -minStart
+    if (du === 0 && dv === 0) return
+
+    const moveOne = (n: RollNote): RollNote | null => {
+      const start = n.start + du
+      if (isDrum) {
+        const di = DRUM_KEYS.indexOf(n.drum!) + dv
+        if (di < 0 || di >= DRUM_KEYS.length) return null
+        return { ...n, start, drum: DRUM_KEYS[di] }
+      }
+      if (mode === 'staff') {
+        const { idx, flat } = staffIndex(n.midi!)
+        const ni = idx - dv
+        if (ni < 0 || ni > DIATONIC_MAX) return null
+        const midi = midiForIdx(ni, flat)
+        if (midi < MIDI_MIN || midi > MIDI_MAX) return null
+        return { ...n, start, midi }
+      }
+      const midi = n.midi! - dv
+      if (midi < MIDI_MIN || midi > MIDI_MAX) return null
+      return { ...n, start, midi }
+    }
+
+    const moved: RollNote[] = []
+    for (const n of sel) {
+      const m = moveOne(n)
+      if (!m) {
+        warn('That move would push notes off the grid.')
+        return
+      }
+      moved.push(m)
+    }
+    const stationary = derived.notes.filter((n) => !keys.has(noteKey(n)))
+    for (const p of moved) {
+      const clash = stationary.filter((m) => p.start < m.start + m.dur && m.start < p.start + p.dur)
+      const cleanChord = clash.every((m) => m.start === p.start && m.dur === p.dur)
+      if (clash.length && (isDrum || !cleanChord)) {
+        warn('That move would overlap other notes.')
+        return
+      }
+    }
+    commit([...stationary, ...moved])
+    setSelected(new Set(moved.map(noteKey)))
+  }
+
+  const onKeyDown = (e: ReactKeyboardEvent) => {
+    const tag = (e.target as HTMLElement).tagName
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+    const mod = e.metaKey || e.ctrlKey
+    const k = e.key.toLowerCase()
+    if (k === 'escape') {
+      if (selected.size) setSelected(new Set())
+      return
+    }
+    // arrow keys nudge the selection: ±1 unit / ±1 step, shift = beat / octave
+    if (selected.size && (k === 'arrowleft' || k === 'arrowright' || k === 'arrowup' || k === 'arrowdown')) {
+      e.preventDefault()
+      if (k === 'arrowleft') applyMove(e.shiftKey ? -4 : -1, 0)
+      else if (k === 'arrowright') applyMove(e.shiftKey ? 4 : 1, 0)
+      else {
+        const big = isDrum ? 1 : mode === 'staff' ? 7 : 12
+        const step = e.shiftKey ? big : 1
+        applyMove(0, k === 'arrowup' ? -step : step)
+      }
+      return
+    }
+    if (mod && k === 'a') {
+      e.preventDefault()
+      setSelected(new Set(derived.notes.map(noteKey)))
+    } else if (mod && k === 'c') {
+      e.preventDefault()
+      copySelection()
+    } else if (mod && k === 'x') {
+      e.preventDefault()
+      cutSelection()
+    } else if (mod && k === 'v') {
+      e.preventDefault()
+      void pasteClip()
+    } else if ((k === 'delete' || k === 'backspace') && selected.size) {
+      e.preventDefault()
+      deleteSelection()
+    }
+  }
+
+  // ---- pointer: click adds/removes, drag past a threshold marquee-selects ---
+
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if (e.button !== 0) return
+    containerRef.current?.focus({ preventScroll: true })
+    const { u, pos } = locate(e)
+    const hit = hitNoteAt(u, pos)
+    drag.current = {
+      x: e.clientX,
+      y: e.clientY,
+      u,
+      pos,
+      moved: false,
+      kind: hit ? 'move' : 'marquee',
+      hitKey: hit ? noteKey(hit) : null,
+      keys: new Set(),
+    }
+    bodyRef.current?.setPointerCapture(e.pointerId)
+  }
+
+  const moveDeltaFor = (d: { x: number; y: number }, e: { clientX: number; clientY: number }) => ({
+    du: Math.round((e.clientX - d.x) / pxPerUnit),
+    dv: Math.round((e.clientY - d.y) / (mode === 'staff' ? STEP : rowH)),
+  })
+
+  const onPointerMove = (e: ReactPointerEvent) => {
+    onMove(e) // hover ghost
+    const d = drag.current
+    if (!d) return
+    if (!d.moved) {
+      if (Math.abs(e.clientX - d.x) < 4 && Math.abs(e.clientY - d.y) < 4) return
+      d.moved = true
+      if (d.kind === 'move') {
+        // grab the whole selection if the pressed note is in it, else just it
+        const inSel = d.hitKey != null && selected.has(d.hitKey)
+        d.keys = inSel ? new Set(selected) : new Set(d.hitKey ? [d.hitKey] : [])
+        if (!inSel) setSelected(d.keys)
+      }
+    }
+    if (d.kind === 'move') {
+      setMoveDelta(moveDeltaFor(d, e))
+    } else {
+      const rect = bodyRef.current!.getBoundingClientRect()
+      setMarquee({ x0: d.x - rect.left, y0: d.y - rect.top, x1: e.clientX - rect.left, y1: e.clientY - rect.top })
+    }
+  }
+
+  const onPointerUp = (e: ReactPointerEvent) => {
+    const d = drag.current
+    drag.current = null
+    bodyRef.current?.releasePointerCapture?.(e.pointerId)
+    if (!d) return
+    if (d.kind === 'move') {
+      setMoveDelta(null)
+      if (d.moved) {
+        const { du, dv } = moveDeltaFor(d, e)
+        applyMove(du, dv, d.keys)
+      } else {
+        addOrRemoveAt(d.u, d.pos, e.shiftKey) // click a note = remove it
+      }
+    } else if (d.moved) {
+      const rect = bodyRef.current!.getBoundingClientRect()
+      finalizeMarquee({ x0: d.x - rect.left, y0: d.y - rect.top, x1: e.clientX - rect.left, y1: e.clientY - rect.top }, e.shiftKey)
+      setMarquee(null)
+    } else {
+      addOrRemoveAt(d.u, d.pos, e.shiftKey) // click empty = add a note
+    }
   }
 
   const onMove = (e: ReactMouseEvent) => {
@@ -578,7 +916,7 @@ export function PianoRoll({
   const barLabelStep = Math.max(1, Math.ceil(44 / (16 * pxPerUnit)))
 
   return (
-    <div className="roll">
+    <div className="roll" ref={containerRef} tabIndex={0} onKeyDown={onKeyDown}>
       <div className="roll-toolbar">
         {!isDrum && (
           <span className="roll-tool">
@@ -602,13 +940,17 @@ export function PianoRoll({
         )}
         <span className="roll-tool">
           Note length
-          <select value={noteLen} onChange={(e) => setNoteLen(parseInt(e.target.value, 10))} disabled={isDrum}>
-            {NOTE_LENGTHS.map((l) => (
-              <option key={l} value={l}>
-                {l} unit{l > 1 ? 's' : ''}
-              </option>
-            ))}
-          </select>
+          <NumberInput
+            value={noteLen}
+            onChange={setNoteLen}
+            min={1}
+            max={NOTE_LEN_MAX}
+            disabled={isDrum}
+            inputClassName="note-len-input"
+            ariaLabel="Note length in grid units"
+            tip="Length of new notes, in grid units — scroll over the field to change"
+          />
+          units
         </span>
         <span className="roll-tool">
           Zoom
@@ -624,8 +966,8 @@ export function PianoRoll({
         </span>
         <span className="roll-hint">
           click empty = add · click note = remove
-          {mode === 'staff' ? ' · shift+click = flat' : ''} · ctrl/cmd+wheel = zoom · 4 units = 1 beat ·
-          zoom &amp; scroll are shared across editors
+          {mode === 'staff' ? ' · shift+click = flat' : ''} · drag empty = select · drag note / arrows = move ·
+          ⌘/ctrl C/X/V · ⌫ delete · ctrl/cmd+wheel = zoom · 4 units = 1 beat
         </span>
       </div>
       {hasMacros && (
@@ -634,7 +976,7 @@ export function PianoRoll({
           (later voices reusing its macros would break).
         </div>
       )}
-      {flash && <div className="roll-note warning">{flash}</div>}
+      {flash && <div className={`roll-note ${flash.warn ? 'warning' : ''}`}>{flash.text}</div>}
       <div className="roll-scroll" ref={scrollRef}>
         <div style={{ width: GUTTER + W, minWidth: '100%' }}>
           <div className="roll-ruler-row" style={{ height: RULER }}>
@@ -694,9 +1036,11 @@ export function PianoRoll({
             <div
               ref={bodyRef}
               style={{ position: 'relative', width: W, height: H, cursor: 'pointer' }}
-              onClick={onClick}
-              onMouseMove={onMove}
-              onMouseLeave={() => {
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerLeave={() => {
+                if (drag.current) return
                 hover.current = null
                 requestAnimationFrame(() => drawRef.current())
               }}
@@ -706,6 +1050,17 @@ export function PianoRoll({
                 ref={overlayRef}
                 style={{ position: 'absolute', top: 0, left: 0, height: H, display: 'block', pointerEvents: 'none' }}
               />
+              {marquee && (
+                <div
+                  className="roll-marquee"
+                  style={{
+                    left: Math.min(marquee.x0, marquee.x1),
+                    top: Math.min(marquee.y0, marquee.y1),
+                    width: Math.abs(marquee.x1 - marquee.x0),
+                    height: Math.abs(marquee.y1 - marquee.y0),
+                  }}
+                />
+              )}
               <div ref={playheadRef} className="playhead" />
             </div>
           </div>

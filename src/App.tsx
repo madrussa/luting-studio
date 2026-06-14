@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { InstrumentPalette } from './components/InstrumentPalette'
 import { VoiceBoard } from './components/VoiceBoard'
 import { Converter } from './components/Converter'
@@ -41,6 +41,9 @@ import {
   prewarm,
 } from './lib/samples'
 import { useTheme, toggleTheme } from './lib/theme'
+import { useHistory } from './lib/useHistory'
+import { docHistoryStore } from './lib/historyStore'
+import type { DocSnapshot } from './lib/historyStore'
 import logoUrl from './assets/conducting.webp'
 
 export interface VoiceUI {
@@ -226,6 +229,42 @@ export default function App() {
     return () => clearTimeout(t)
   }, [bpm, voices, showSyntax, songName, currentSongId])
   const [importWarnings, setImportWarnings] = useState<string[]>([])
+
+  // Undo / redo: the music (bpm + voices) plus the open song's identity, so
+  // undoing across an Import or Library load restores the right name too. The
+  // rolling 20-step buffer persists to IndexedDB, surviving reloads.
+  const liveDoc = useMemo<DocSnapshot>(
+    () => ({ bpm, voices, songName, currentSongId }),
+    [bpm, voices, songName, currentSongId]
+  )
+  const applyDoc = useCallback((d: DocSnapshot) => {
+    setBpm(d.bpm)
+    setVoices(d.voices.map((v) => ({ ...v })))
+    setSongName(d.songName)
+    setCurrentSongId(d.currentSongId)
+  }, [])
+  const { undo, redo, canUndo, canRedo, undoCount, redoCount } = useHistory(liveDoc, applyDoc, docHistoryStore)
+
+  // Ctrl/⌘+Z undo, Ctrl/⌘+Shift+Z (or Ctrl/⌘+Y) redo. Skip while a text field
+  // is focused so the syntax box / inputs keep their own character-level undo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      const key = e.key.toLowerCase()
+      const isUndo = key === 'z' && !e.shiftKey
+      const isRedo = (key === 'z' && e.shiftKey) || key === 'y'
+      if (!isUndo && !isRedo) return
+      const el = document.activeElement
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable)) {
+        return
+      }
+      e.preventDefault()
+      if (isUndo) undo()
+      else redo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo, redo])
 
   const luting = useMemo(() => {
     const parts = voices
@@ -488,7 +527,14 @@ export default function App() {
       />
 
       <div className="workspace">
-        <InstrumentPalette />
+        <InstrumentPalette
+          undo={undo}
+          redo={redo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          undoCount={undoCount}
+          redoCount={redoCount}
+        />
         <VoiceBoard voices={voices} setVoices={setVoices} bpm={bpm} setBpm={setBpm} showSyntax={showSyntax} />
       </div>
 

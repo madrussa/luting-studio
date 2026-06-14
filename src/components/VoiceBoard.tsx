@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction, DragEvent } from 'react'
 import { PianoRoll } from './PianoRoll'
 import { VoiceStrip } from './VoiceStrip'
@@ -14,6 +14,7 @@ import { INSTRUMENTS, instrumentByCode } from '../lib/luting'
 import { playLuting, stopPlayback, getPlaybackInfo } from '../lib/player'
 import { useActivePlayback } from '../lib/usePlayback'
 import { INSTRUMENT_MIME } from './InstrumentPalette'
+import { NumberInput } from './NumberInput'
 
 const VOICE_MIME = 'application/x-luting-voice'
 
@@ -26,16 +27,43 @@ interface Props {
 }
 
 export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax }: Props) {
-  const [dragOver, setDragOver] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+  // live drop indicator while dragging over the list: either an insertion gap
+  // (index) or an instrument-swap onto an existing voice (swapId)
+  const [drop, setDrop] = useState<{ index: number; swapId: string | null } | null>(null)
+  // id of the voice awaiting a remove confirmation, or null when the dialog is closed
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const confirmVoice = voices.find((v) => v.id === confirmId) ?? null
 
   const update = (id: string, patch: Partial<VoiceUI>) =>
     setVoices((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)))
 
   const remove = (id: string) => setVoices((vs) => vs.filter((v) => v.id !== id))
 
-  const addVoice = (instrument: string) => {
+  const confirmRemove = () => {
+    if (confirmId) remove(confirmId)
+    setConfirmId(null)
+  }
+
+  // Esc cancels the remove dialog, Enter confirms it.
+  useEffect(() => {
+    if (!confirmId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirmId(null)
+      else if (e.key === 'Enter') confirmRemove()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmId])
+
+  const addVoiceAt = (instrument: string, index: number) => {
     const name = instrumentByCode(instrument)?.name ?? 'Voice'
-    setVoices((vs) => [...vs, { id: newVoiceId(), instrument, body: '', label: name }])
+    setVoices((vs) => {
+      const next = [...vs]
+      next.splice(index, 0, { id: newVoiceId(), instrument, body: '', label: name })
+      return next
+    })
   }
 
   const moveVoice = (fromId: string, toIndex: number) =>
@@ -81,21 +109,54 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax }: Props
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullLuting])
 
-  const onBoardDrop = (e: DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-    const ins = e.dataTransfer.getData(INSTRUMENT_MIME)
-    if (ins) addVoice(ins)
-    const vid = e.dataTransfer.getData(VOICE_MIME)
-    if (vid) moveVoice(vid, voices.length)
+  // Where a drag would land: an instrument over a card's center band swaps that
+  // voice's instrument; anywhere else (gaps, card top/bottom edges, empty space)
+  // inserts at the nearest gap. Voice (reorder) drags always insert.
+  const computeDrop = (clientY: number, isInstrument: boolean): { index: number; swapId: string | null } => {
+    const cards = listRef.current ? [...listRef.current.querySelectorAll<HTMLElement>('.voice-card')] : []
+    if (isInstrument) {
+      for (let i = 0; i < cards.length; i++) {
+        const r = cards[i].getBoundingClientRect()
+        if (clientY < r.top || clientY > r.bottom) continue
+        const band = r.height * 0.3 // top/bottom 30% insert, center 40% swaps
+        if (clientY > r.top + band && clientY < r.bottom - band) return { index: i, swapId: voices[i].id }
+        break
+      }
+    }
+    let index = cards.length
+    for (let i = 0; i < cards.length; i++) {
+      const r = cards[i].getBoundingClientRect()
+      if (clientY < r.top + r.height / 2) {
+        index = i
+        break
+      }
+    }
+    return { index, swapId: null }
   }
 
-  const allowDrop = (e: DragEvent) => {
-    if (
-      e.dataTransfer.types.includes(INSTRUMENT_MIME) ||
-      e.dataTransfer.types.includes(VOICE_MIME)
-    ) {
-      e.preventDefault()
+  const onListDragOver = (e: DragEvent) => {
+    const types = e.dataTransfer.types
+    const isInstrument = types.includes(INSTRUMENT_MIME)
+    if (!isInstrument && !types.includes(VOICE_MIME)) return
+    e.preventDefault()
+    setDrop(computeDrop(e.clientY, isInstrument))
+  }
+
+  const onListDragLeave = (e: DragEvent) => {
+    if (!listRef.current?.contains(e.relatedTarget as Node | null)) setDrop(null)
+  }
+
+  const onListDrop = (e: DragEvent) => {
+    e.preventDefault()
+    const d = drop
+    setDrop(null)
+    const ins = e.dataTransfer.getData(INSTRUMENT_MIME)
+    const vid = e.dataTransfer.getData(VOICE_MIME)
+    if (ins) {
+      if (d?.swapId) update(d.swapId, { instrument: ins })
+      else addVoiceAt(ins, d ? d.index : voices.length)
+    } else if (vid) {
+      moveVoice(vid, d ? d.index : voices.length)
     }
   }
 
@@ -105,48 +166,70 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax }: Props
         <div className="panel-title">
           Voices <span className="panel-sub">each plays at the same time, separated by |</span>
         </div>
-        <label className="bpm-control">
+        <label className="bpm-control" data-tip="tip: 4× your song's BPM, then t4 = quarter notes">
           #lute BPM
-          <input
-            type="number"
-            min={1}
-            value={bpm}
-            onChange={(e) => setBpm(Math.max(1, parseInt(e.target.value, 10) || 1))}
-          />
-          <span className="bpm-hint">tip: 4× your song's BPM, then t4 = quarter notes</span>
+          <NumberInput value={bpm} onChange={setBpm} min={1} ariaLabel="Beats per minute" />
         </label>
       </div>
 
       <div
-        className={`voice-list ${dragOver ? 'drag-over' : ''}`}
-        onDragOver={(e) => {
-          allowDrop(e)
-          setDragOver(true)
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onBoardDrop}
+        className={`voice-list ${drop ? 'drag-over' : ''}`}
+        ref={listRef}
+        onDragOver={onListDragOver}
+        onDragLeave={onListDragLeave}
+        onDrop={onListDrop}
       >
         {voices.length === 0 && (
           <div className="empty-hint">Drag an instrument here to add a voice 🪕</div>
         )}
         {voices.map((v, idx) => (
-          <VoiceCard
-            key={v.id}
-            voice={v}
-            voiceIndex={idx}
-            parsed={parsed}
-            totalUnits={totalUnits}
-            showSyntax={showSyntax}
-            onSolo={(startAt) => soloVoice(idx, v.id, startAt)}
-            onChange={(patch) => update(v.id, patch)}
-            onRemove={() => remove(v.id)}
-            onDropBefore={(payload) => {
-              if (payload.instrument) update(v.id, { instrument: payload.instrument })
-              if (payload.voiceId && payload.voiceId !== v.id) moveVoice(payload.voiceId, idx)
-            }}
-          />
+          <Fragment key={v.id}>
+            {drop && drop.swapId === null && drop.index === idx && <div className="drop-line" />}
+            <VoiceCard
+              voice={v}
+              voiceIndex={idx}
+              parsed={parsed}
+              totalUnits={totalUnits}
+              showSyntax={showSyntax}
+              swapHighlight={drop?.swapId === v.id}
+              onSolo={(startAt) => soloVoice(idx, v.id, startAt)}
+              onChange={(patch) => update(v.id, patch)}
+              onRemove={() => setConfirmId(v.id)}
+            />
+          </Fragment>
         ))}
+        {drop && drop.swapId === null && drop.index === voices.length && <div className="drop-line" />}
       </div>
+
+      {confirmVoice && (
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConfirmId(null)
+          }}
+        >
+          <div className="modal modal-confirm" role="alertdialog" aria-modal="true" aria-label="Remove voice">
+            <div className="modal-head">
+              <span className="panel-title">Remove voice?</span>
+              <button className="icon-btn" aria-label="Cancel" data-tip="Cancel" data-tip-pos="right" onClick={() => setConfirmId(null)}>
+                <X size={14} />
+              </button>
+            </div>
+            <p className="confirm-body">
+              <strong>{confirmVoice.label?.trim() || 'This voice'}</strong>
+              {confirmVoice.body.trim() ? ' and its notes will be deleted.' : ' will be removed.'} This can't be undone.
+            </p>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setConfirmId(null)}>
+                Cancel
+              </button>
+              <button className="btn danger" autoFocus onClick={confirmRemove}>
+                <X size={14} /> Remove voice
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
@@ -157,14 +240,13 @@ interface CardProps {
   parsed: ParseResult
   totalUnits: number
   showSyntax: boolean
+  swapHighlight: boolean
   onSolo: (startAt?: number) => void
   onChange: (patch: Partial<VoiceUI>) => void
   onRemove: () => void
-  onDropBefore: (payload: { instrument?: string; voiceId?: string }) => void
 }
 
-function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, onSolo, onChange, onRemove, onDropBefore }: CardProps) {
-  const [over, setOver] = useState(false)
+function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, swapHighlight, onSolo, onChange, onRemove }: CardProps) {
   const [editing, setEditing] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
   const [caret, setCaret] = useState<number | null>(null)
@@ -211,29 +293,7 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, onSolo, 
   }
 
   return (
-    <div
-      className={`voice-card ${over ? 'drag-over' : ''} ${voice.muted ? 'muted' : ''}`}
-      onDragOver={(e) => {
-        if (
-          e.dataTransfer.types.includes(INSTRUMENT_MIME) ||
-          e.dataTransfer.types.includes(VOICE_MIME)
-        ) {
-          e.preventDefault()
-          e.stopPropagation()
-          setOver(true)
-        }
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        setOver(false)
-        onDropBefore({
-          instrument: e.dataTransfer.getData(INSTRUMENT_MIME) || undefined,
-          voiceId: e.dataTransfer.getData(VOICE_MIME) || undefined,
-        })
-      }}
-    >
+    <div className={`voice-card ${swapHighlight ? 'drag-over' : ''} ${voice.muted ? 'muted' : ''}`}>
       <div className="voice-head">
         <span
           className="drag-handle"

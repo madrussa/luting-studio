@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { parseLuting, INSTRUMENTS } from '../lib/luting'
 import { playLuting, getPlaybackInfo } from '../lib/player'
@@ -49,7 +49,8 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
     () => (parsed ? [...parsed.notes].sort((a, b) => a.timeSec - b.timeSec) : []),
     [parsed]
   )
-  const wrapRef = useRef<HTMLDivElement>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const roRef = useRef<ResizeObserver | null>(null)
   const baseRef = useRef<HTMLCanvasElement>(null)
   const hlRef = useRef<HTMLCanvasElement>(null)
   const playheadRef = useRef<HTMLDivElement>(null)
@@ -64,13 +65,21 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
   const laneH = Math.max(12, Math.min(26, Math.round(300 / laneCount)))
   const H = laneCount * laneH
 
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
-    ro.observe(el)
-    setWidth(el.clientWidth)
-    return () => ro.disconnect()
+  // Bind the ResizeObserver through a callback ref so it (re)attaches every
+  // time the wrap element mounts. The timeline returns null when there are no
+  // notes, so this element comes and goes (e.g. cut everything, then paste); a
+  // one-shot effect would miss the remount and leave width stuck at 0, so the
+  // canvas would never get sized or drawn.
+  const setWrapRef = useCallback((el: HTMLDivElement | null) => {
+    wrapRef.current = el
+    roRef.current?.disconnect()
+    roRef.current = null
+    if (el) {
+      const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+      ro.observe(el)
+      roRef.current = ro
+      setWidth(el.clientWidth)
+    }
   }, [])
 
   const noteRect = (n: (typeof sortedNotes)[number], dur: number) => {
@@ -219,7 +228,7 @@ export function Timeline({ luting, lanes, trim, onTrimPick }: Props) {
       </div>
       <div
         className="timeline-canvas-wrap"
-        ref={wrapRef}
+        ref={setWrapRef}
         style={{ height: H }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

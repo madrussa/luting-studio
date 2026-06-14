@@ -8,6 +8,7 @@ import { useActivePlayback } from '../lib/usePlayback'
 import { Timeline } from './Timeline'
 import type { Lane, TrimUI } from './Timeline'
 import { ScoreView } from './ScoreView'
+import { NumberInput } from './NumberInput'
 import {
   Play,
   Square,
@@ -188,22 +189,22 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
         <div className="trim-row">
           <Scissors size={13} />
           <span>Remove first</span>
-          <input
-            type="number"
+          <NumberInput
+            value={Math.round(trimFirst * 10) / 10}
+            onChange={setTrimFirst}
             min={0}
             max={Math.max(0, dur - trimLast - 0.1)}
             step={0.1}
-            value={Math.round(trimFirst * 10) / 10}
-            onChange={(e) => setTrimFirst(parseFloat(e.target.value) || 0)}
+            ariaLabel="Seconds to remove from the start"
           />
           <span>s · last</span>
-          <input
-            type="number"
+          <NumberInput
+            value={Math.round(trimLast * 10) / 10}
+            onChange={setTrimLast}
             min={0}
             max={Math.max(0, dur - trimFirst - 0.1)}
             step={0.1}
-            value={Math.round(trimLast * 10) / 10}
-            onChange={(e) => setTrimLast(parseFloat(e.target.value) || 0)}
+            ariaLabel="Seconds to remove from the end"
           />
           <span>s</span>
           {trimPicking === 'start' && (

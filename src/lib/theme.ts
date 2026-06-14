@@ -66,6 +66,9 @@ export interface CanvasColors {
   hover: string
   band: string
   ink: string
+  /** marquee-selected note: solid outline + translucent fill */
+  sel: string
+  selFill: string
   /** "r,g,b" for the playback note-flash (alpha applied per frame) */
   flashRgb: string
 }
@@ -83,6 +86,8 @@ const DARK: CanvasColors = {
   hover: 'rgba(255,255,255,0.25)',
   band: 'rgba(255,255,255,0.08)',
   ink: '#ffffff',
+  sel: '#5ad1b3',
+  selFill: 'rgba(90,209,179,0.32)',
   flashRgb: '255,255,255',
 }
 
@@ -99,6 +104,8 @@ const LIGHT: CanvasColors = {
   hover: 'rgba(40,30,70,0.2)',
   band: 'rgba(40,30,70,0.1)',
   ink: '#241b3a',
+  sel: '#149678',
+  selFill: 'rgba(20,150,120,0.30)',
   flashRgb: '36,27,58',
 }
 

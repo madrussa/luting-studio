@@ -6,6 +6,7 @@ import { convertAudio } from "../lib/pitch";
 import { INSTRUMENTS, importLuting } from "../lib/luting";
 import { unoptimizeLuting } from "../lib/optimize";
 import { FileMusic, Loader2, Import } from "lucide-react";
+import { NumberInput } from "./NumberInput";
 
 interface Props {
   onImport: (result: ConvertResult) => void;
@@ -137,27 +138,11 @@ export function Converter({ onImport }: Props) {
       <div className="convert-options">
         <label>
           MIDI max voices
-          <input
-            type="number"
-            min={1}
-            max={MAX_CONVERT_VOICES}
-            value={maxVoices}
-            onChange={(e) =>
-              setMaxVoices(Math.min(MAX_CONVERT_VOICES, Math.max(1, parseInt(e.target.value, 10) || 1)))
-            }
-          />
+          <NumberInput value={maxVoices} onChange={setMaxVoices} min={1} max={MAX_CONVERT_VOICES} ariaLabel="MIDI max voices" />
         </label>
         <label>
           MP3 song BPM
-          <input
-            type="number"
-            min={20}
-            max={300}
-            value={audioBpm}
-            onChange={(e) =>
-              setAudioBpm(Math.min(300, Math.max(20, parseInt(e.target.value, 10) || 120)))
-            }
-          />
+          <NumberInput value={audioBpm} onChange={setAudioBpm} min={20} max={300} ariaLabel="MP3 song BPM" />
         </label>
         <label>
           MP3 instrument
