@@ -10,6 +10,8 @@ export interface DocSnapshot {
   voices: VoiceUI[]
   songName: string
   currentSongId: string | null
+  /** notation key id; optional for snapshots saved before keys existed */
+  songKey?: string
 }
 
 const DB_NAME = 'luting-history'

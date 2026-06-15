@@ -77,6 +77,7 @@ function loadSaved(): {
   showSyntax?: boolean
   songName?: string
   currentSongId?: string | null
+  songKey?: string
 } | null {
   try {
     const s = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')
@@ -104,6 +105,8 @@ export default function App() {
   const [songName, setSongName] = useState(() => loadSaved()?.songName ?? '')
   const [currentSongId, setCurrentSongId] = useState<string | null>(() => loadSaved()?.currentSongId ?? null)
   const [justSaved, setJustSaved] = useState(false)
+  // song-level notation key; persisted with the board and saved per-song
+  const [songKey, setSongKey] = useState(() => loadSaved()?.songKey ?? 'C')
   const theme = useTheme()
   const [volume, setVolume] = useState(() => getMasterVolume())
   const prevVolume = useRef(0.8)
@@ -221,27 +224,28 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ bpm, voices, showSyntax, songName, currentSongId }))
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ bpm, voices, showSyntax, songName, currentSongId, songKey }))
       } catch {
         // storage full or unavailable; the board just won't persist
       }
     }, 500)
     return () => clearTimeout(t)
-  }, [bpm, voices, showSyntax, songName, currentSongId])
+  }, [bpm, voices, showSyntax, songName, currentSongId, songKey])
   const [importWarnings, setImportWarnings] = useState<string[]>([])
 
   // Undo / redo: the music (bpm + voices) plus the open song's identity, so
   // undoing across an Import or Library load restores the right name too. The
   // rolling 20-step buffer persists to IndexedDB, surviving reloads.
   const liveDoc = useMemo<DocSnapshot>(
-    () => ({ bpm, voices, songName, currentSongId }),
-    [bpm, voices, songName, currentSongId]
+    () => ({ bpm, voices, songName, currentSongId, songKey }),
+    [bpm, voices, songName, currentSongId, songKey]
   )
   const applyDoc = useCallback((d: DocSnapshot) => {
     setBpm(d.bpm)
     setVoices(d.voices.map((v) => ({ ...v })))
     setSongName(d.songName)
     setCurrentSongId(d.currentSongId)
+    setSongKey(d.songKey ?? 'C')
   }, [])
   const { undo, redo, canUndo, canRedo, undoCount, redoCount } = useHistory(liveDoc, applyDoc, docHistoryStore)
 
@@ -360,6 +364,7 @@ export default function App() {
     setVoices(song.voices.map((v) => ({ ...v })))
     setSongName(song.name)
     setCurrentSongId(song.id)
+    setSongKey(song.songKey ?? 'C')
     setLibraryOpen(false)
   }
 
@@ -518,6 +523,7 @@ export default function App() {
         luting={luting}
         songName={songName}
         currentSongId={currentSongId}
+        songKey={songKey}
         onSaved={(id, name) => {
           setCurrentSongId(id)
           setSongName(name)
@@ -535,7 +541,7 @@ export default function App() {
           undoCount={undoCount}
           redoCount={redoCount}
         />
-        <VoiceBoard voices={voices} setVoices={setVoices} bpm={bpm} setBpm={setBpm} showSyntax={showSyntax} />
+        <VoiceBoard voices={voices} setVoices={setVoices} bpm={bpm} setBpm={setBpm} showSyntax={showSyntax} songKey={songKey} setSongKey={setSongKey} />
       </div>
 
       <OutputPanel luting={luting} lanes={lanes} onLoadLuting={handleLoadLuting} onTrim={handleTrim} />

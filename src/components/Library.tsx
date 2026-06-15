@@ -17,6 +17,7 @@ interface Props {
   luting: string
   songName: string
   currentSongId: string | null
+  songKey: string
   onSaved: (id: string, name: string) => void
   onLoad: (song: SavedSong) => void
 }
@@ -29,7 +30,7 @@ const fmtWhen = (ts: number): string => {
   return new Date(ts).toLocaleDateString()
 }
 
-export function Library({ open, onClose, bpm, voices, luting, songName, currentSongId, onSaved, onLoad }: Props) {
+export function Library({ open, onClose, bpm, voices, luting, songName, currentSongId, songKey, onSaved, onLoad }: Props) {
   const [songs, setSongs] = useState<SavedSong[]>([])
   const [name, setName] = useState(songName)
   const [deleteArm, setDeleteArm] = useState<string | null>(null)
@@ -57,6 +58,7 @@ export function Library({ open, onClose, bpm, voices, luting, songName, currentS
     chars: luting.length,
     voiceCount: voices.filter((v) => !v.muted && v.body.trim() !== '').length,
     durationSec: luting ? parseLuting(luting).durationSec : 0,
+    songKey,
   })
 
   const save = async (asCopy: boolean) => {

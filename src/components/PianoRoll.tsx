@@ -23,13 +23,14 @@ import { useTheme, canvasColors } from '../lib/theme'
 import { instrumentColor } from './Timeline'
 import { Minus, Plus, TriangleAlert, LayoutGrid, Music } from 'lucide-react'
 import { NumberInput } from './NumberInput'
+import { keyById, keyFlattens } from '../lib/keys'
 
 const MIDI_MAX = 107 // b7
 const MIDI_MIN = 24 // c1
 const MELODIC_ROWS = MIDI_MAX - MIDI_MIN + 1
 const DRUM_KEYS = Object.keys(DRUM_SOUNDS)
 const NOTE_LEN_MAX = 64
-const GUTTER = 52
+const GUTTER = 64
 const RULER = 16
 
 // ---- staff geometry: diatonic steps from C1 (idx 0) to B7 (idx 48) --------
@@ -41,6 +42,10 @@ const LETTERS = 'cdefgab'
 const LETTER_SEMI: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }
 const TREBLE_LINES = [23, 25, 27, 29, 31] // E4 G4 B4 D5 F5
 const BASS_LINES = [11, 13, 15, 17, 19] // G2 B2 D3 F3 A3
+// staff idx where each key-signature flat sits, per clef (standard positions,
+// in the flat order B E A D G C that the keys add them)
+const TREBLE_FLAT_IDX: Record<string, number> = { b: 27, e: 30, a: 26, d: 29, g: 25, c: 28 }
+const BASS_FLAT_IDX: Record<string, number> = { b: 13, e: 16, a: 12, d: 15, g: 11, c: 14 }
 
 const staffIndex = (midi: number): { idx: number; flat: boolean } => {
   const p = midiToPitch(midi)
@@ -61,6 +66,8 @@ interface Props {
   totalUnits: number
   /** playback id of this voice's solo, for playhead tracking */
   voiceId: string
+  /** song key id; sets the default accidental per staff line in notation mode */
+  songKey?: string
   /** note range to spotlight (driven by the caret in the syntax box) */
   highlight?: { from: number; count: number } | null
   /** start solo playback at a time (seconds); driven by ruler scrubbing */
@@ -75,6 +82,7 @@ export function PianoRoll({
   body,
   totalUnits,
   voiceId,
+  songKey,
   highlight,
   onScrub,
   onChangeBody,
@@ -83,6 +91,11 @@ export function PianoRoll({
   const view = useRollView()
   const { pxPerUnit, scrollUnits } = view
   const mode = isDrum ? 'grid' : view.mode
+
+  // notation key: the default accidental for a staff line (its letter) before
+  // the Shift override. C major flattens nothing, so default behaviour is kept.
+  const musicKey = keyById(songKey ?? 'C')
+  const staffFlatDefault = (pos: number): boolean => keyFlattens(musicKey, LETTERS[pos % 7])
 
   const rows = isDrum ? DRUM_KEYS.length : MELODIC_ROWS
   const rowH = isDrum ? 16 : 10
@@ -262,10 +275,14 @@ export function PianoRoll({
         }
         ctx.stroke()
       }
-      if (flat) {
+      // accidental: show only what the key signature doesn't already imply — a
+      // ♭ for a flat outside the key, a ♮ where the key flattens this line but
+      // the note is natural. Notes that match the key draw clean.
+      const acc = flat === staffFlatDefault(idx) ? '' : flat ? '♭' : '♮'
+      if (acc) {
         ctx.fillStyle = color
         ctx.font = 'bold 11px serif'
-        ctx.fillText('♭', x - 7, y + 3.5)
+        ctx.fillText(acc, x - 7, y + 3.5)
       }
     }
 
@@ -282,10 +299,11 @@ export function PianoRoll({
       ctx.stroke()
       ctx.fillStyle = col.hover
       ctx.fillRect(gx, gy - 2, Math.max(2, noteLen * pxPerUnit - 1), 4)
-      if (flat) {
+      const acc = flat === staffFlatDefault(pos) ? '' : flat ? '♭' : '♮'
+      if (acc) {
         ctx.fillStyle = col.ink
         ctx.font = 'bold 11px serif'
-        ctx.fillText('♭', gx - 7, gy + 3.5)
+        ctx.fillText(acc, gx - 7, gy + 3.5)
       }
       ctx.globalAlpha = 1
     }
@@ -597,7 +615,8 @@ export function PianoRoll({
     if (isDrum) {
       note = { start: u, dur: 1, drum: DRUM_KEYS[pos] }
     } else if (mode === 'staff') {
-      const midi = midiForIdx(pos, shiftKey)
+      // key flattens this line by default; Shift toggles back to the natural
+      const midi = midiForIdx(pos, staffFlatDefault(pos) !== shiftKey)
       if (midi < MIDI_MIN || midi > MIDI_MAX) {
         warn('That position is outside the playable o1–o7 range.')
         return
@@ -910,7 +929,7 @@ export function PianoRoll({
 
   const onMove = (e: ReactMouseEvent) => {
     const { u, pos } = locate(e)
-    const flat = mode === 'staff' && e.shiftKey
+    const flat = mode === 'staff' && staffFlatDefault(pos) !== e.shiftKey
     if (hover.current?.u !== u || hover.current?.pos !== pos || hover.current?.flat !== flat) {
       hover.current = { u, pos, flat }
       cancelAnimationFrame(rafRef.current)
@@ -1044,6 +1063,22 @@ export function PianoRoll({
                   <span className="staff-clef" style={{ top: yForIdx(20), fontSize: 34 }}>
                     {'\u{1D122}'}
                   </span>
+                  {musicKey.flats.flatMap((letter, i) => [
+                    <span
+                      key={`t-${letter}`}
+                      className="staff-keysig"
+                      style={{ top: yForIdx(TREBLE_FLAT_IDX[letter]), left: 34 + i * 3.5 }}
+                    >
+                      ♭
+                    </span>,
+                    <span
+                      key={`b-${letter}`}
+                      className="staff-keysig"
+                      style={{ top: yForIdx(BASS_FLAT_IDX[letter]), left: 34 + i * 3.5 }}
+                    >
+                      ♭
+                    </span>,
+                  ])}
                   <span className="staff-gutter-label" style={{ top: yForIdx(21) - 7 }}>c4</span>
                 </>
               ) : (

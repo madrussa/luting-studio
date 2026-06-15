@@ -16,6 +16,8 @@ import { useActivePlayback } from '../lib/usePlayback'
 import { INSTRUMENT_MIME } from './InstrumentPalette'
 import { NumberInput } from './NumberInput'
 import { useBackdropClose } from '../lib/useBackdropClose'
+import { KEYS } from '../lib/keys'
+import { useRollView } from '../lib/rollView'
 
 const VOICE_MIME = 'application/x-luting-voice'
 
@@ -25,9 +27,13 @@ interface Props {
   bpm: number
   setBpm: (bpm: number) => void
   showSyntax: boolean
+  songKey: string
+  setSongKey: (k: string) => void
 }
 
-export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax }: Props) {
+export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax, songKey, setSongKey }: Props) {
+  // the key only affects notation input, so it's only shown in staff view
+  const staffView = useRollView().mode === 'staff'
   const listRef = useRef<HTMLDivElement>(null)
   // live drop indicator while dragging over the list: either an insertion gap
   // (index) or an instrument-swap onto an existing voice (swapId)
@@ -168,10 +174,24 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax }: Props
         <div className="panel-title">
           Voices <span className="panel-sub">each plays at the same time, separated by |</span>
         </div>
-        <label className="bpm-control" data-tip="tip: 4× your song's BPM, then t4 = quarter notes">
-          #lute BPM
-          <NumberInput value={bpm} onChange={setBpm} min={1} ariaLabel="Beats per minute" />
-        </label>
+        <div className="board-controls">
+          {staffView && (
+            <label className="bpm-control" data-tip="Notation key — flattens the right notes for you in staff view (flat keys only for now). Shift-click overrides.">
+              Key
+              <select value={songKey} onChange={(e) => setSongKey(e.target.value)} aria-label="Song key">
+                {KEYS.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="bpm-control" data-tip="tip: 4× your song's BPM, then t4 = quarter notes">
+            #lute BPM
+            <NumberInput value={bpm} onChange={setBpm} min={1} ariaLabel="Beats per minute" />
+          </label>
+        </div>
       </div>
 
       <div
@@ -193,6 +213,7 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax }: Props
               parsed={parsed}
               totalUnits={totalUnits}
               showSyntax={showSyntax}
+              songKey={songKey}
               swapHighlight={drop?.swapId === v.id}
               onSolo={(startAt) => soloVoice(idx, v.id, startAt)}
               onChange={(patch) => update(v.id, patch)}
@@ -237,13 +258,14 @@ interface CardProps {
   parsed: ParseResult
   totalUnits: number
   showSyntax: boolean
+  songKey: string
   swapHighlight: boolean
   onSolo: (startAt?: number) => void
   onChange: (patch: Partial<VoiceUI>) => void
   onRemove: () => void
 }
 
-function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, swapHighlight, onSolo, onChange, onRemove }: CardProps) {
+function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey, swapHighlight, onSolo, onChange, onRemove }: CardProps) {
   const [editing, setEditing] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
   const [caret, setCaret] = useState<number | null>(null)
@@ -407,6 +429,7 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, swapHigh
           body={voice.body}
           totalUnits={totalUnits}
           voiceId={voice.id}
+          songKey={songKey}
           highlight={highlight}
           onScrub={(t) => onSolo(t)}
           onChangeBody={(body) => onChange({ body })}

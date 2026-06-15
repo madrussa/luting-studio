@@ -764,12 +764,21 @@ body {
   gap: 12px;
   flex-wrap: wrap;
 }
+.board-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
 .bpm-control {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
   color: var(--text-dim);
+}
+.bpm-control select {
+  padding: 5px 6px;
 }
 .bpm-control input {
   width: 56px;
@@ -1031,6 +1040,15 @@ body {
   line-height: 1;
   font-family: serif;
   color: var(--text);
+  pointer-events: none;
+}
+.staff-keysig {
+  position: absolute;
+  font-family: serif;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text);
+  transform: translateY(-50%);
   pointer-events: none;
 }
 .roll-row-label {

@@ -12,6 +12,8 @@ export interface SavedSong {
   chars: number
   voiceCount: number
   durationSec: number
+  /** notation key id; optional for songs saved before keys existed */
+  songKey?: string
 }
 
 const DB_NAME = 'luting-studio'
