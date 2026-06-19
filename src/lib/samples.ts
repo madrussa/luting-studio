@@ -1,7 +1,7 @@
 // Real-sample playback, converted from LuteBoi's recorded multisample banks
 // (see tools/convert-samples.py). Packs are lazy-loaded per instrument and
 // decoded once; the engine pitch-shifts from the nearest sampled note and
-// crossfade-loops the sustain region for long notes. Lute/Bass/Chiptune/
+// ping-pong-loops the sustain region for long notes. Lute/Bass/Chiptune/
 // Percussion have no packs — LuteBoi synthesizes them too, so they always use
 // our synth.
 
@@ -42,7 +42,7 @@ export function subscribePlaybackMode(cb: () => void): () => void {
 interface MelodicSample {
   midi: number
   buffer: AudioBuffer
-  /** crossfaded loop region (seconds), baked at decode time; only used if the bank loops */
+  /** ping-pong loop region (seconds), baked at decode time; only used if the bank loops */
   loopStart: number
   loopEnd: number
 }
@@ -82,37 +82,59 @@ function b64ToArrayBuffer(b64: string): ArrayBuffer {
 }
 
 /**
- * Bake a click-free forward loop into a decoded sustain sample. A native
- * AudioBufferSourceNode loop jumps instantly from loopEnd back to loopStart, so
- * for a clean loop the samples arriving at loopEnd must lead smoothly into the
- * samples at loopStart. We equal-power crossfade the tail of the loop (the
- * samples just before loopEnd) toward the samples just before loopStart, so
- * after the jump the waveform continues as if uninterrupted — continuous in
- * both value and slope, with the amplitude difference between the two points
- * smoothed across the fade rather than stepping (which pops). Pure ping-pong,
- * like LuteBoi's offline renderer, is continuous in value but folds the
- * waveform back on itself, leaving a slope corner that pops on a sustained
- * real-time note; the crossfade avoids that. Mutates `buf` in place (the bank
- * owns it) and returns the loop points in seconds.
+ * Bake a ping-pong sustain loop into a decoded sample. A native
+ * AudioBufferSourceNode only loops forward, so the obvious approach — loop a
+ * fixed slice [loopStart, loopEnd) — jumps the playhead back to loopStart every
+ * pass. Even crossfaded clean of clicks, that *resets* the amplitude level each
+ * loop (the slice's tail is quieter than its head), so the loudness sawtooths
+ * with a constructive-overlap spike every loop period — an audible ~0.75s
+ * throb. Instead we build a longer buffer whose loop region is the slice played
+ * forward then in reverse; looping *that* forward retraces the contour up and
+ * back down, so the amplitude swells smoothly (a triangle, no reset). The two
+ * velocity-reversal turning points would leave a slope corner that pops, so we
+ * round each over ±W samples (raised cosine) — continuous in value AND slope.
+ * Returns a NEW buffer (ping-pong can't be done in place) plus loop points; the
+ * intro [0, loopStart) plays once, then [loopStart, end) ping-pongs forever.
  */
-function bakeLoop(buf: AudioBuffer): { loopStart: number; loopEnd: number } {
+function bakePingpong(
+  ctx: BaseAudioContext,
+  buf: AudioBuffer
+): { buffer: AudioBuffer; loopStart: number; loopEnd: number } {
   const sr = buf.sampleRate
   const len = buf.length
-  // Loop a stable slice of the sustain: clear of the attack and the decay tail.
+  // Ping-pong a stable slice of the sustain: clear of the attack and decay tail.
   const loopStart = Math.floor(len * 0.3)
   const loopEnd = Math.floor(len * 0.85)
-  // Crossfade window, bounded by the headroom before loopStart and the loop length.
-  const xf = Math.max(0, Math.min(Math.floor(sr * 0.12), loopStart, loopEnd - loopStart - 1))
+  const L = loopEnd - loopStart // forward run length
+  const P = 2 * L - 2 // ping-pong period (forward + reverse, shared endpoints dropped)
+  const W = Math.min(Math.floor(sr * 0.008), L - 2) // 8ms turn-smoothing half-width
+  const outLen = loopStart + P
+  const out = ctx.createBuffer(buf.numberOfChannels, outLen, sr)
+  const at = (d: Float32Array, i: number) => d[Math.max(0, Math.min(len - 1, i))]
+
   for (let ch = 0; ch < buf.numberOfChannels; ch++) {
     const d = buf.getChannelData(ch)
-    for (let k = 0; k < xf; k++) {
-      const w = (k + 0.5) / xf // 0 → 1 across the window
-      const tail = d[loopEnd - xf + k] // original loop tail, fading out
-      const head = d[loopStart - xf + k] // pre-loopStart content, fading in
-      d[loopEnd - xf + k] = tail * Math.cos((w * Math.PI) / 2) + head * Math.sin((w * Math.PI) / 2)
+    const o = out.getChannelData(ch)
+    for (let i = 0; i < loopStart; i++) o[i] = d[i] // intro, plays once
+    for (let j = 0; j < L; j++) o[loopStart + j] = d[loopStart + j] // forward run
+    for (let m = 1; m <= L - 2; m++) o[loopStart + L - 1 + m] = d[loopEnd - 1 - m] // reverse run
+
+    // Round a turning point: the apex value is already continuous (it's a
+    // mirror), so we blend the incoming stream into the outgoing one across the
+    // window to make the slope continuous too, killing the corner pop.
+    const smooth = (apexRegionIdx: number, apexBufIdx: number, incomingForward: boolean) => {
+      for (let delta = -W; delta <= W; delta++) {
+        const wt = 0.5 * (1 - Math.cos((Math.PI * (delta + W)) / (2 * W))) // 0→1, 0.5 at apex
+        const pin = incomingForward ? at(d, apexBufIdx + delta) : at(d, apexBufIdx - delta)
+        const pout = incomingForward ? at(d, apexBufIdx - delta) : at(d, apexBufIdx + delta)
+        const idx = loopStart + (((apexRegionIdx + delta) % P) + P) % P
+        o[idx] = (1 - wt) * pin + wt * pout
+      }
     }
+    smooth(L - 1, loopEnd - 1, true) // forward → reverse turn
+    smooth(0, loopStart, false) // reverse → forward wrap turn
   }
-  return { loopStart: loopStart / sr, loopEnd: loopEnd / sr }
+  return { buffer: out, loopStart: loopStart / sr, loopEnd: outLen / sr }
 }
 
 function ensureIndex(): Promise<Set<string>> {
@@ -151,8 +173,12 @@ export function loadBank(code: string): Promise<Bank | null> {
         try {
           const buf = await ctx.decodeAudioData(b64ToArrayBuffer(b64))
           if (/^\d+$/.test(key)) {
-            const lp = pack.loop ? bakeLoop(buf) : { loopStart: 0, loopEnd: 0 }
-            melodic.push({ midi: parseInt(key, 10), buffer: buf, ...lp })
+            if (pack.loop) {
+              const { buffer, loopStart, loopEnd } = bakePingpong(ctx, buf)
+              melodic.push({ midi: parseInt(key, 10), buffer, loopStart, loopEnd })
+            } else {
+              melodic.push({ midi: parseInt(key, 10), buffer: buf, loopStart: 0, loopEnd: 0 })
+            }
           } else drums[key] = buf
         } catch {
           /* skip a note that won't decode */
@@ -184,12 +210,14 @@ export function prewarm(codes: Iterable<string>) {
 
 const RELEASE = 0.08
 
-// Struck/plucked instruments keep ringing down after the attack instead of
-// holding a steady sustain. Holding their looped sample at full volume turns
-// the loop into a reverby drone, so we decay the gain at a fixed rate the way a
-// real string does. Keyed by instrument code → seconds to fall ~30 dB. (Only
-// the piano for now; bell/vibraphone/slap bass could join if they sound off.)
-const DECAY_SEC: Record<string, number> = { k: 2.2 }
+// LuteBoi's note-end envelope, applied uniformly to every sampled voice (it's
+// not per-instrument there): hold the sample's own level until LEG_STAC of the
+// note, then ring down with a fixed time constant over the remaining tail. The
+// held sustain — the drone — is intentional and true to LuteBoi; short notes
+// barely decay, long notes hold then ring out. Mirrors render2's
+// `note[dec_ind:] *= exp(-arange/3000)` with dec_ind = leg_stac * length.
+const LEG_STAC = 0.9
+const DECAY_TAU = 3000 / 44100 // ≈68ms, LuteBoi's exp(-n/3000) at 44.1kHz
 
 /**
  * Schedule a note from real samples. Returns false if no sample is available
@@ -234,17 +262,18 @@ export function scheduleSampled(ctx: AudioContext, dest: AudioNode, n: Scheduled
   const g = ctx.createGain()
   const peak = n.volume * 0.8
   const attackEnd = start + 0.005
+  // Hold flat until LEG_STAC of the note (the sample's own envelope shows
+  // through — a held drone for sustained voices), then ring down with a fixed
+  // ~68ms time constant over the last tail, like LuteBoi. Anchoring the decay's
+  // target by that time constant (rather than letting the ramp stretch to fit)
+  // keeps the ring-down sharp on long notes and barely-there on short ones.
+  const decAt = Math.max(attackEnd, start + LEG_STAC * Math.max(0.03, n.durSec))
   g.gain.setValueAtTime(0, start)
   g.gain.linearRampToValueAtTime(peak, attackEnd)
-  const decaySec = DECAY_SEC[n.instrument]
-  if (decaySec && peak > 0.0001) {
-    // Constant-rate ring-down (same dB/s regardless of note length), cut short
-    // if the note ends before it has fully decayed. A short note barely decays;
-    // a long one falls to a near-silent tail, so the loop never drones.
-    const decayHit = Math.min(attackEnd + decaySec, holdEnd)
-    const target = Math.max(peak * Math.pow(0.03, (decayHit - attackEnd) / decaySec), 0.0001)
-    g.gain.exponentialRampToValueAtTime(target, decayHit)
-    g.gain.setValueAtTime(target, holdEnd)
+  if (peak > 0.0001) {
+    g.gain.setValueAtTime(peak, decAt)
+    const target = peak * Math.exp(-(holdEnd - decAt) / DECAY_TAU)
+    g.gain.exponentialRampToValueAtTime(Math.max(target, 0.00001), holdEnd)
   } else {
     g.gain.setValueAtTime(peak, holdEnd)
   }
