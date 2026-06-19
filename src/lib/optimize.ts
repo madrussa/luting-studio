@@ -84,14 +84,21 @@ interface Candidate {
   positions: number[]
   len: number
   gain: number
+  /** Voice index if every occurrence is in one voice, else -1 (spans voices). */
+  loc: number
 }
 
 /**
- * Find the repeated token sequence with the highest character saving.
+ * Find the repeated token sequence with the highest character saving, among
+ * those whose required macro name is still available (per `canUse`).
  * Saving for k non-overlapping occurrences of a sequence L chars long:
  * k*L before; (L+3) for the definition + (k-1) refs after => (k-1)(L-1) - 3.
  */
-function findBest(tokens: string[]): Candidate | null {
+function findBest(
+  tokens: string[],
+  canUse: (loc: number) => boolean,
+  localNames: Set<string>,
+): Candidate | null {
   const n = tokens.length
   if (n < 2) return null
 
@@ -126,6 +133,15 @@ function findBest(tokens: string[]): Candidate | null {
   for (let i = n - 1; i >= 0; i--) {
     if (tokens[i][0] === 'i') nextInstr = i
     instrNext[i] = nextInstr
+  }
+
+  // which voice each token belongs to, so we can tell a within-voice (local)
+  // sequence from one whose occurrences span voices (global)
+  const voiceId = new Int32Array(n)
+  let vc = 0
+  for (let i = 0; i < n; i++) {
+    voiceId[i] = vc
+    if (tokens[i] === '|') vc++
   }
 
   const clen = new Float64Array(n + 1)
@@ -199,7 +215,27 @@ function findBest(tokens: string[]): Candidate | null {
       const L = clen[base + len] - clen[base]
       const gain = (chosen.length - 1) * (L - 1) - 3
       if (gain > 0 && (!best || gain > best.gain)) {
-        best = { positions: chosen, len, gain }
+        let loc = voiceId[chosen[0]]
+        for (let ci = 1; ci < chosen.length; ci++) {
+          if (voiceId[chosen[ci]] !== loc) {
+            loc = -1
+            break
+          }
+        }
+        // A global macro is expanded eagerly at definition time, so its body
+        // must not reference a voice-local macro: that reference would freeze to
+        // the defining voice's value and play wrong when the global is reused in
+        // another voice. (luteboi's isLocalDef rejects the same case.)
+        if (loc < 0) {
+          for (let k = 0; k < len; k++) {
+            const c0 = tokens[base + k][0]
+            if (c0 >= 'A' && c0 <= 'Z' && localNames.has(c0)) {
+              loc = -2 // illegal — neither a safe global nor (it spans voices) a local
+              break
+            }
+          }
+        }
+        if (loc !== -2 && canUse(loc)) best = { positions: chosen, len, gain, loc }
       }
     }
   }
@@ -356,11 +392,42 @@ export function optimizeLuting(rawInput: string): OptimizeResult {
   let tokens = tokenize(expanded, warnings)
   if (!tokens) return unchanged('Unbalanced parentheses; could not optimize.')
 
+  // Macro names share one 26-letter namespace, but luteboi's parser lets a name
+  // be redefined and resolves each reference against the latest definition in
+  // textual order. So a name used entirely within one voice (local) can be
+  // reused by other voices, while a name whose references span voices (global)
+  // must stay unique across the whole song. Mirror the original optimiser:
+  // globals draw from Z→A, locals from A→Z per voice, and the pools are kept
+  // disjoint by letter so the two never collide. This removes the old hard cap
+  // of 26 macros for the entire song (it's now up to ~26 per voice).
+  const numVoices = tokens.reduce((c, t) => c + (t === '|' ? 1 : 0), 1)
+  const globalPool = NAMES.split('').reverse() // Z, Y, X, … A
+  const localPools = Array.from({ length: numVoices }, () => NAMES.split('')) // A … Z
+  const drop = (pool: string[], name: string) => {
+    const k = pool.indexOf(name)
+    if (k !== -1) pool.splice(k, 1)
+  }
+  const canUse = (loc: number) => (loc < 0 ? globalPool.length > 0 : localPools[loc].length > 0)
+  const localNames = new Set<string>()
+
   let macrosUsed = 0
-  while (macrosUsed < NAMES.length) {
-    const best = findBest(tokens)
+  for (;;) {
+    const best = findBest(tokens, canUse, localNames)
     if (!best) break
-    tokens = substitute(tokens, best, NAMES[macrosUsed])
+    let name: string
+    if (best.loc < 0) {
+      // global: claim the name everywhere so no voice can redefine it
+      name = globalPool[0]
+      drop(globalPool, name)
+      for (const lp of localPools) drop(lp, name)
+    } else {
+      // local: claim from this voice and bar it from ever being used globally
+      name = localPools[best.loc][0]
+      drop(localPools[best.loc], name)
+      drop(globalPool, name)
+      localNames.add(name)
+    }
+    tokens = substitute(tokens, best, name)
     macrosUsed++
   }
 
