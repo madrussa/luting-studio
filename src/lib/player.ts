@@ -10,7 +10,12 @@ interface SynthConfig {
   style: 'pluck' | 'sustain'
   /** lowpass cutoff as a multiple of the note frequency */
   cutoff: number
+  /** absolute lowpass cutoff in Hz; overrides cutoff*freq when set, so brightness
+   * stays fixed as pitch rises (matches luteboi's fixed one-pole filters) */
+  cutoffHz?: number
   release: number
+  /** attack time in seconds (default: 5ms for pluck, 40ms for sustain) */
+  attack?: number
   gain: number
   /** add an oscillator one octave down */
   sub?: boolean
@@ -41,14 +46,19 @@ interface SynthConfig {
 const SYNTHS: Record<string, SynthConfig> = {
   // bright plucked string: strong h2/h4 (1, .79, .17, .39), decays to ~17% by 0.85s
   l: { wave: 'sawtooth', style: 'pluck', cutoff: 4.5, release: 0.3, gain: 0.9, decay: 1.3 },
-  // much darker than expected: h2 only .09 — nearly a pure sine, slow decay
-  b: { wave: 'triangle', style: 'pluck', cutoff: 2, release: 0.25, gain: 1.5, sub: true, decay: 1.6 },
+  // additive in luteboi (pysynth_b): h2 dominant (~.5) + h3/h4 (~.12/.14), no
+  // sub-octave; upper harmonics decay ~3x faster (bright→mellow). Sawtooth
+  // supplies the even harmonics a triangle lacks; static filter can't do the
+  // bright→mellow sweep, so this matches the body, not the evolution.
+  b: { wave: 'sawtooth', style: 'pluck', cutoff: 3, release: 0.25, gain: 1.3, decay: 2.3 },
   // sine plus a healthy octave partial (h2 .55)
   f: { wave: 'triangle', style: 'sustain', cutoff: 3.5, release: 0.12, gain: 1.0 },
   // the octave harmonic DOMINATES the fundamental (h2 1.0 vs h1 .54)
   k: { wave: 'sawtooth', style: 'pluck', cutoff: 5, release: 0.3, gain: 0.9, decay: 0.9 },
-  // textbook filtered square (1, 0, .21, 0, .06), hard on/off envelope
-  c: { wave: 'square', style: 'sustain', cutoff: 4, release: 0.02, gain: 0.55 },
+  // 50% square through luteboi's FIXED ~740Hz one-pole lowpass (pysynth_d), so
+  // higher notes get darker — an absolute cutoffHz, not freq-relative. ~800Hz
+  // for our steeper biquad. Near-instant onset (no sustain swell).
+  c: { wave: 'square', style: 'sustain', cutoff: 4, cutoffHz: 800, release: 0.02, gain: 0.55, attack: 0.003 },
   // meow: written pitch, rises ~70 cents into the note, formant at h4 (~1kHz)
   m: { wave: 'sawtooth', style: 'sustain', cutoff: 6, release: 0.1, gain: 1.5, vibrato: 15, glide: -70, grain: true, formant: { mul: 4, q: 5, min: 1000, max: 2600, body: 18 } },
   // plays an OCTAVE DOWN; vocal formant around 2x the (shifted) fundamental
@@ -115,22 +125,23 @@ function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
     bodyGain.connect(gain)
   } else {
     filter.type = 'lowpass'
-    filter.frequency.value = Math.min(16000, freq * cfg.cutoff)
+    filter.frequency.value = cfg.cutoffHz ?? Math.min(16000, freq * cfg.cutoff)
   }
   filter.connect(gain)
   gain.connect(dest)
 
   const peak = cfg.gain * n.volume * 0.22
+  const atk = cfg.attack ?? (cfg.style === 'pluck' ? 0.005 : 0.04)
   const g = gain.gain
   g.setValueAtTime(0, start)
   if (cfg.style === 'pluck') {
-    g.linearRampToValueAtTime(peak, start + 0.005)
+    g.linearRampToValueAtTime(peak, start + atk)
     // decay at the instrument's own rate, cut short by the note's end
-    const decayEnd = Math.min(start + 0.005 + (cfg.decay ?? 2.5), holdEnd + cfg.release)
+    const decayEnd = Math.min(start + atk + (cfg.decay ?? 2.5), holdEnd + cfg.release)
     g.exponentialRampToValueAtTime(Math.max(peak * 0.05, 0.001), decayEnd)
     g.linearRampToValueAtTime(0, stopAt)
   } else {
-    g.linearRampToValueAtTime(peak, start + 0.04)
+    g.linearRampToValueAtTime(peak, start + atk)
     g.setValueAtTime(peak, holdEnd)
     g.linearRampToValueAtTime(0, holdEnd + cfg.release)
   }
@@ -190,6 +201,111 @@ function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
     o.start(start)
     o.stop(stopAt)
   }
+}
+
+// The lute has no sample pack — LuteBoi synthesizes it with Karplus-Strong
+// plucked-string modeling (pysynth_s.py), which is what gives it the twang: a
+// broadband noise-burst "pick" excites a feedback delay whose in-loop averaging
+// lowpass makes high harmonics decay faster than low ones (bright onset → mellow
+// tail). A subtractive sawtooth can't reproduce that, so we run the same
+// recurrence in JS and play the result as a buffer — a Web Audio DelayNode
+// feedback loop can't, because its 128-sample render-quantum latency breaks
+// pitch above ~344Hz. Ported from pysynth_s render2; decay is calibrated to the
+// note length (a short note damps fast, a long one rings), then bounded so the
+// natural ring doesn't overlap forever. Cached per pitch+length like LuteBoi's.
+const ksCache = new Map<string, AudioBuffer>()
+
+function karplusBuffer(ctx: BaseAudioContext, freq: number, durSec: number): AudioBuffer {
+  const sr = ctx.sampleRate
+  const key = `${sr}:${Math.round(freq * 100)}:${Math.round(durSec * 100)}`
+  const hit = ksCache.get(key)
+  if (hit) return hit
+
+  const lf = Math.log(freq)
+  const period = sr / freq
+  const numPeriods = Math.max(1, Math.round(durSec * freq))
+  const q = period * numPeriods
+  let sndLen = Math.round((10 - lf) * q)
+  if (lf < 4) sndLen *= 2
+  sndLen = Math.min(sndLen, Math.round((durSec + 2.5) * sr)) // bound the ring
+  sndLen = Math.max(sndLen, Math.round(0.05 * sr))
+
+  const kpLen = Math.max(2, Math.round(period))
+  const sm = 10 // noise-burst pre-smoothing window
+  const falloff = Math.pow((4 / lf) * 0.25, 1 / numPeriods) // per-period loop gain
+  const volfac = 1 + 0.8 * ((lf - 3) / 5.5) * Math.cos((Math.PI / 5.3) * (lf - 3))
+
+  const kps1 = new Float32Array(sndLen)
+  const kps2 = new Float32Array(sndLen)
+  for (let i = 0; i < kpLen && i < sndLen; i++) kps1[i] = Math.random() * 2 - 1
+  for (let t = 0; t < kpLen && t < sndLen; t++) {
+    let s = 0
+    for (let k = 0; k < sm; k++) s += t + k < sndLen ? kps1[t + k] : 0
+    kps2[t] = s / sm
+  }
+  const li = Math.floor(period)
+  const hi = Math.ceil(period)
+  const ifac = period - li
+  const delt2 = (period * (li - 1)) / li
+  const ifac2 = delt2 - Math.floor(delt2)
+  for (let t = hi; t < sndLen; t++) {
+    const v1 = ifac * kps2[t - hi] + (1 - ifac) * kps2[t - li]
+    const v2 = ifac2 * kps2[t - hi + 1] + (1 - ifac2) * kps2[t - li + 1]
+    kps2[t] += 0.5 * (v1 + v2) * falloff
+  }
+  const fade = Math.min(Math.round(0.02 * sr), sndLen) // anti-click at the bounded end
+  for (let i = 0; i < fade; i++) kps2[sndLen - 1 - i] *= i / fade
+
+  const buf = ctx.createBuffer(1, sndLen, sr)
+  const d = buf.getChannelData(0)
+  for (let i = 0; i < sndLen; i++) d[i] = kps2[i] * volfac
+  ksCache.set(key, buf)
+  return buf
+}
+
+function scheduleKarplus(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
+  const cfg = SYNTHS.l
+  const freq = 440 * Math.pow(2, ((n.midi ?? 60) - 69) / 12 + (cfg.octaveShift ?? 0))
+  const start = t0 + n.timeSec
+  const src = ctx.createBufferSource()
+  src.buffer = karplusBuffer(ctx, freq, Math.max(0.05, n.durSec))
+  const g = ctx.createGain()
+  // The buffer already carries the string's decay; the gain just sets level,
+  // with a 2ms attack to avoid a click from the noise burst's first sample.
+  const peak = cfg.gain * n.volume * 0.5
+  g.gain.setValueAtTime(0, start)
+  g.gain.linearRampToValueAtTime(peak, start + 0.002)
+  src.connect(g)
+  g.connect(dest)
+  src.start(start)
+  src.stop(start + src.buffer.duration + 0.02)
+}
+
+// LuteBoi's percussion (pysynth_p) is filtered white noise, not a pitched tone:
+// a noise burst through a gentle lowpass with a fast exponential ring-down
+// (exp(-x/1000) ≈ 23ms time constant), gone by ~70ms. Pitch only set the burst
+// length there, so we ignore it. A pitched triangle (the old SYNTHS.p) was the
+// wrong primitive — no config could turn a harmonic tone into broadband noise.
+function scheduleNoisePerc(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
+  const start = t0 + n.timeSec
+  const src = ctx.createBufferSource()
+  src.buffer = getNoise(ctx)
+  src.loop = true
+  const filter = ctx.createBiquadFilter()
+  filter.type = 'lowpass'
+  filter.frequency.value = 5500 // ~the measured spectral centroid
+  filter.Q.value = 0.7
+  const g = ctx.createGain()
+  const peak = n.volume * 0.6
+  const tau = 0.023
+  g.gain.setValueAtTime(peak, start)
+  g.gain.exponentialRampToValueAtTime(Math.max(peak * Math.exp(-0.07 / tau), 0.0001), start + 0.07)
+  g.gain.linearRampToValueAtTime(0, start + 0.085)
+  src.connect(filter)
+  filter.connect(g)
+  g.connect(dest)
+  src.start(start)
+  src.stop(start + 0.1)
 }
 
 function noiseBurst(
@@ -453,6 +569,8 @@ export function playLuting(text: string, opts: PlayOptions = {}): PlayHandle {
         getPlaybackMode() === 'quality' && getBank(n.instrument) && scheduleSampled(ctx, dest, n, t0)
       if (sampled) continue
       if (n.drum) scheduleDrum(ctx, dest, n, t0)
+      else if (n.instrument === 'l') scheduleKarplus(ctx, dest, n, t0)
+      else if (n.instrument === 'p') scheduleNoisePerc(ctx, dest, n, t0)
       else scheduleMelodic(ctx, dest, n, t0)
     }
   }
