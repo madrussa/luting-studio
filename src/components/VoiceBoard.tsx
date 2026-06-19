@@ -6,7 +6,11 @@ import { parseLuting } from '../lib/luting'
 import type { ParseResult } from '../lib/luting'
 import { GripVertical, Piano, Volume2, VolumeX, Play, Square, X, ChevronUp, ChevronDown } from 'lucide-react'
 import { transposeBody, locateNoteAt } from '../lib/transform'
-import Editor from 'react-simple-code-editor'
+import EditorImport from 'react-simple-code-editor'
+// react-simple-code-editor ships only CJS; under Vite's rolldown interop the
+// default import can arrive as the module namespace ({ default }), so unwrap it.
+const Editor = ((EditorImport as unknown as { default?: typeof EditorImport }).default ??
+  EditorImport) as typeof EditorImport
 import { highlightLuting } from '../lib/lutingLang'
 import type { VoiceUI } from '../App'
 import { newVoiceId } from '../App'
