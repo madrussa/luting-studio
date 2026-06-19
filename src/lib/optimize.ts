@@ -215,6 +215,24 @@ function findBest(
       const L = clen[base + len] - clen[base]
       const gain = (chosen.length - 1) * (L - 1) - 3
       if (gain > 0 && (!best || gain > best.gain)) {
+        // a candidate must contain balanced macro brackets — it may never split
+        // a definition (open without close, or close one opened outside it)
+        let depth = 0
+        let illegal = false
+        for (let k = 0; k < len; k++) {
+          const tk = tokens[base + k]
+          if (tk.endsWith('{')) depth++
+          else if (tk === '}') {
+            depth--
+            if (depth < 0) {
+              illegal = true
+              break
+            }
+          }
+        }
+        if (depth !== 0) illegal = true
+        if (illegal) continue
+
         let loc = voiceId[chosen[0]]
         for (let ci = 1; ci < chosen.length; ci++) {
           if (voiceId[chosen[ci]] !== loc) {
@@ -242,7 +260,12 @@ function findBest(
   return best
 }
 
-/** Replace occurrences: first becomes the definition (which also plays), the rest become refs. */
+/**
+ * First occurrence becomes the definition, with its body kept inline as
+ * separate `name{`, …body…, `}` tokens (so later passes can still find and
+ * factor repeats *inside* it — this is what enables nested macros). The other
+ * occurrences become single-letter reference tokens.
+ */
 function substitute(tokens: string[], cand: Candidate, name: string): string[] {
   const posSet = new Set(cand.positions)
   const out: string[] = []
@@ -250,8 +273,14 @@ function substitute(tokens: string[], cand: Candidate, name: string): string[] {
   let i = 0
   while (i < tokens.length) {
     if (posSet.has(i)) {
-      out.push(first ? `${name}{${tokens.slice(i, i + cand.len).join('')}}` : name)
-      first = false
+      if (first) {
+        out.push(name + '{')
+        for (let k = 0; k < cand.len; k++) out.push(tokens[i + k])
+        out.push('}')
+        first = false
+      } else {
+        out.push(name)
+      }
       i += cand.len
     } else {
       out.push(tokens[i])
@@ -261,19 +290,37 @@ function substitute(tokens: string[], cand: Candidate, name: string): string[] {
   return out
 }
 
-/** Join tokens, collapsing runs: A A A -> A3, X{...} X X -> X{...}3. */
+/**
+ * Concatenate tokens, folding repeats: refs `A A A` -> `A3`, and a definition
+ * immediately followed by its own refs `X{…} X X` -> `X{…}3` (the count rides
+ * on the closing `}`, matching how luteboi's parser replays a definition).
+ */
 function emit(tokens: string[]): string {
   let out = ''
+  const stack: string[] = []
   let i = 0
   while (i < tokens.length) {
     const t = tokens[i]
+    const isStart = t.length >= 2 && t.endsWith('{') && t[0] >= 'A' && t[0] <= 'Z'
     const isRef = t.length === 1 && t >= 'A' && t <= 'Z'
-    const isDef = t.length > 1 && t[0] >= 'A' && t[0] <= 'Z' && t[1] === '{'
-    if (isRef || isDef) {
-      const name = t[0]
+    if (isStart) {
+      out += t
+      stack.push(t[0])
+      i++
+    } else if (t === '}') {
+      const name = stack.pop()
       let j = i + 1
       let count = 1
-      while (j < tokens.length && tokens[j] === name) {
+      while (name !== undefined && j < tokens.length && tokens[j] === name) {
+        count++
+        j++
+      }
+      out += count > 1 ? `}${count}` : '}'
+      i = j
+    } else if (isRef) {
+      let j = i + 1
+      let count = 1
+      while (j < tokens.length && tokens[j] === t) {
         count++
         j++
       }
