@@ -402,6 +402,109 @@ export function unoptimizeLuting(rawInput: string): OptimizeResult {
   return { output, before, after: output.length, macrosUsed: 0, warnings }
 }
 
+/**
+ * Drop redundant absolute octave directives — an `oN` (or bare `o`, meaning
+ * octave 4) that sets the octave to the value it already holds. The luteboi
+ * parser changes the running octave only via o/>/< (chords carry their own
+ * local octave), so we can track it exactly and delete the no-ops without
+ * touching the sound. The result is still schedule-checked before use.
+ */
+function stripRedundantOctave(expanded: string): string {
+  return expanded
+    .split('|')
+    .map((v) => {
+      let oct = 4
+      let out = ''
+      let i = 0
+      if (v[0] === 'i') {
+        out += v.slice(0, 2) // instrument letter may be 'o' (organ) — never an octave op
+        i = 2
+      }
+      while (i < v.length) {
+        const c = v[i]
+        if (c === '(') {
+          let j = v.indexOf(')', i)
+          if (j === -1) j = v.length - 1
+          let k = j + 1
+          while (k < v.length && (v[k] === '/' || (v[k] >= '0' && v[k] <= '9'))) k++
+          out += v.slice(i, k)
+          i = k
+        } else if (c === 'o') {
+          const hasN = v[i + 1] >= '0' && v[i + 1] <= '8'
+          const target = hasN ? +v[i + 1] : 4
+          const len = hasN ? 2 : 1
+          if (target === oct) i += len // redundant — drop it
+          else {
+            oct = target
+            out += v.slice(i, i + len)
+            i += len
+          }
+        } else if (c === '>' || c === '<') {
+          const hasN = v[i + 1] >= '0' && v[i + 1] <= '8'
+          const step = hasN ? +v[i + 1] : 1
+          oct = c === '>' ? Math.min(8, oct + step) : Math.max(0, oct - step)
+          out += v.slice(i, i + (hasN ? 2 : 1))
+          i += hasN ? 2 : 1
+        } else {
+          out += c
+          i++
+        }
+      }
+      return out
+    })
+    .join('|')
+}
+
+/**
+ * Tokenize an expanded body and greedily compress it into macros. Returns the
+ * full optimized luting (header + body) and the macro count, or null if the
+ * body can't be tokenized.
+ *
+ * Macro names share one 26-letter namespace, but luteboi's parser lets a name
+ * be redefined and resolves each reference against the latest definition in
+ * textual order. So a name used entirely within one voice (local) can be reused
+ * by other voices, while a name whose references span voices (global) must stay
+ * unique. We mirror the original optimiser: globals draw from Z→A, locals from
+ * A→Z per voice, kept disjoint by letter so the two never collide — lifting the
+ * old hard cap of 26 macros for the whole song to ~26 per voice.
+ */
+function compress(expanded: string, header: string, warnings: string[]): { output: string; macrosUsed: number } | null {
+  let tokens = tokenize(expanded, warnings)
+  if (!tokens) return null
+
+  const numVoices = tokens.reduce((c, t) => c + (t === '|' ? 1 : 0), 1)
+  const globalPool = NAMES.split('').reverse() // Z, Y, X, … A
+  const localPools = Array.from({ length: numVoices }, () => NAMES.split('')) // A … Z
+  const drop = (pool: string[], name: string) => {
+    const k = pool.indexOf(name)
+    if (k !== -1) pool.splice(k, 1)
+  }
+  const canUse = (loc: number) => (loc < 0 ? globalPool.length > 0 : localPools[loc].length > 0)
+  const localNames = new Set<string>()
+
+  let macrosUsed = 0
+  for (;;) {
+    const best = findBest(tokens, canUse, localNames)
+    if (!best) break
+    let name: string
+    if (best.loc < 0) {
+      // global: claim the name everywhere so no voice can redefine it
+      name = globalPool[0]
+      drop(globalPool, name)
+      for (const lp of localPools) drop(lp, name)
+    } else {
+      // local: claim from this voice and bar it from ever being used globally
+      name = localPools[best.loc][0]
+      drop(localPools[best.loc], name)
+      drop(globalPool, name)
+      localNames.add(name)
+    }
+    tokens = substitute(tokens, best, name)
+    macrosUsed++
+  }
+  return { output: header + emit(tokens), macrosUsed }
+}
+
 export function optimizeLuting(rawInput: string): OptimizeResult {
   const warnings: string[] = []
   const before = rawInput.length
@@ -436,55 +539,34 @@ export function optimizeLuting(rawInput: string): OptimizeResult {
     .map((v) => expandMacros(v, defs, 0, warnings))
     .join('|')
 
-  let tokens = tokenize(expanded, warnings)
-  if (!tokens) return unchanged('Unbalanced parentheses; could not optimize.')
+  // Compress the plain expansion and an octave-canonicalised variant, then keep
+  // whichever is smaller and still matches the original schedule. Stripping
+  // redundant octave resets usually helps, but can occasionally fragment a
+  // clean repeat, so we never assume it wins.
+  const stripped = stripRedundantOctave(expanded)
+  const variants = stripped === expanded ? [expanded] : [expanded, stripped]
 
-  // Macro names share one 26-letter namespace, but luteboi's parser lets a name
-  // be redefined and resolves each reference against the latest definition in
-  // textual order. So a name used entirely within one voice (local) can be
-  // reused by other voices, while a name whose references span voices (global)
-  // must stay unique across the whole song. Mirror the original optimiser:
-  // globals draw from Z→A, locals from A→Z per voice, and the pools are kept
-  // disjoint by letter so the two never collide. This removes the old hard cap
-  // of 26 macros for the entire song (it's now up to ~26 per voice).
-  const numVoices = tokens.reduce((c, t) => c + (t === '|' ? 1 : 0), 1)
-  const globalPool = NAMES.split('').reverse() // Z, Y, X, … A
-  const localPools = Array.from({ length: numVoices }, () => NAMES.split('')) // A … Z
-  const drop = (pool: string[], name: string) => {
-    const k = pool.indexOf(name)
-    if (k !== -1) pool.splice(k, 1)
-  }
-  const canUse = (loc: number) => (loc < 0 ? globalPool.length > 0 : localPools[loc].length > 0)
-  const localNames = new Set<string>()
-
-  let macrosUsed = 0
-  for (;;) {
-    const best = findBest(tokens, canUse, localNames)
-    if (!best) break
-    let name: string
-    if (best.loc < 0) {
-      // global: claim the name everywhere so no voice can redefine it
-      name = globalPool[0]
-      drop(globalPool, name)
-      for (const lp of localPools) drop(lp, name)
-    } else {
-      // local: claim from this voice and bar it from ever being used globally
-      name = localPools[best.loc][0]
-      drop(localPools[best.loc], name)
-      drop(globalPool, name)
-      localNames.add(name)
+  let best: { output: string; macrosUsed: number } | null = null
+  let tokenizeFailed = false
+  for (const variant of variants) {
+    const c = compress(variant, header, warnings)
+    if (!c) {
+      tokenizeFailed = true
+      continue
     }
-    tokens = substitute(tokens, best, name)
-    macrosUsed++
+    if (!schedulesMatch(parseLuting(input), parseLuting(c.output))) continue
+    if (!best || c.output.length < best.output.length) best = c
   }
 
-  const optimized = header + emit(tokens)
-
-  if (!schedulesMatch(parseLuting(input), parseLuting(optimized))) {
-    return unchanged('Optimizer self-check failed; keeping the original.')
+  if (!best) {
+    return unchanged(
+      tokenizeFailed
+        ? 'Unbalanced parentheses; could not optimize.'
+        : 'Optimizer self-check failed; keeping the original.',
+    )
   }
-  if (optimized.length >= before) {
+  if (best.output.length >= before) {
     return unchanged('Already as small as the optimizer can make it.')
   }
-  return { output: optimized, before, after: optimized.length, macrosUsed, warnings }
+  return { output: best.output, before, after: best.output.length, macrosUsed: best.macrosUsed, warnings: [...new Set(warnings)] }
 }
