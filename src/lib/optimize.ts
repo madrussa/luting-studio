@@ -115,6 +115,19 @@ function findBest(tokens: string[]): Candidate | null {
     sepNext[i] = next
   }
 
+  // a sequence may not contain an instrument directive (ik, iv, …). luteboi
+  // resets the instrument per voice, so an instrument lifted into a macro and
+  // replayed by a reference elsewhere sets the wrong instrument — or, when the
+  // reference is in another voice, none at all (reverting it to the default
+  // lute). The original optimiser excludes these in calculateUniqueSubstrings.
+  const instrNext = new Int32Array(n + 1)
+  let nextInstr = n
+  instrNext[n] = n
+  for (let i = n - 1; i >= 0; i--) {
+    if (tokens[i][0] === 'i') nextInstr = i
+    instrNext[i] = nextInstr
+  }
+
   const clen = new Float64Array(n + 1)
   for (let i = 0; i < n; i++) clen[i + 1] = clen[i] + tokens[i].length
 
@@ -143,6 +156,7 @@ function findBest(tokens: string[]): Candidate | null {
     const groups = new Map<number, number[]>()
     for (let i = 0; i + len <= n; i++) {
       if (sepNext[i] < i + len) continue
+      if (instrNext[i] < i + len) continue
       const key = sub1(i, len) * M2 + sub2(i, len)
       const g = groups.get(key)
       if (g) {
