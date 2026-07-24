@@ -335,6 +335,10 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey,
     () => parsed.notes.filter((n) => n.voice === voiceIndex),
     [parsed, voiceIndex]
   )
+  const ghostNotes = useMemo(
+    () => parsed.notes.filter((n) => n.voice !== voiceIndex),
+    [parsed, voiceIndex]
+  )
 
   // caret position in the syntax box -> spotlighted note in the editor grid
   const highlight = useMemo(
@@ -484,6 +488,7 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey,
       {editing && (
         <PianoRoll
           notes={voiceNotes}
+          ghostNotes={ghostNotes}
           bpm={parsed.bpm}
           instrument={voice.instrument}
           body={voice.body}

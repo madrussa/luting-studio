@@ -21,7 +21,7 @@ import { useActivePlayback } from '../lib/usePlayback'
 import { useRollView, setRollView, getRollView, clampZoom } from '../lib/rollView'
 import { useTheme, canvasColors } from '../lib/theme'
 import { instrumentColor } from './Timeline'
-import { Minus, Plus, TriangleAlert, LayoutGrid, Music } from 'lucide-react'
+import { Minus, Plus, TriangleAlert, LayoutGrid, Music, Ghost } from 'lucide-react'
 import { NumberInput } from './NumberInput'
 import { keyById, keyFlattens } from '../lib/keys'
 
@@ -59,6 +59,8 @@ const midiForIdx = (idx: number, flat: boolean): number => {
 
 interface Props {
   notes: ScheduledNote[]
+  /** the other voices' notes, drawn as grey silhouettes when ghosts are on */
+  ghostNotes?: ScheduledNote[]
   bpm: number
   instrument: string
   body: string
@@ -77,6 +79,7 @@ interface Props {
 
 export function PianoRoll({
   notes: parsedNotes,
+  ghostNotes,
   bpm,
   instrument,
   body,
@@ -143,6 +146,16 @@ export function PianoRoll({
     () => ({ notes: scheduledToRollNotes(parsedNotes, bpm), volume: dominantVolume(parsedNotes) }),
     [parsedNotes, bpm]
   )
+
+  // other voices' notes, same-kind only (drum rows mean nothing to a melody
+  // and vice versa), drawn behind this voice's notes when ghosts are on
+  const ghosts = useMemo(() => {
+    if (!ghostNotes) return []
+    return scheduledToRollNotes(
+      ghostNotes.filter((n) => (isDrum ? n.drum !== undefined : n.midi !== undefined)),
+      bpm
+    )
+  }, [ghostNotes, bpm, isDrum])
 
   const rowForNote = (n: RollNote) => (isDrum ? DRUM_KEYS.indexOf(n.drum!) : MIDI_MAX - (n.midi ?? 60))
   // stable identity for selection (two notes can't share start+dur+pitch)
@@ -211,6 +224,22 @@ export function PianoRoll({
       if (idx >= 21 && idx <= 22) line(21) // middle C
       for (let p = 33; p <= idx; p += 2) line(p)
       for (let p = 9; p >= idx; p -= 2) line(p)
+    }
+
+    // ghost voices: just their faint duration bars at pitch height, so the
+    // harmony context reads without notation clutter
+    if (view.ghosts && ghosts.length) {
+      ctx.fillStyle = col.ink
+      ctx.globalAlpha = 0.13
+      for (const n of ghosts) {
+        if (n.midi === undefined) continue
+        const x = n.start * pxPerUnit
+        const w = Math.max(2, n.dur * pxPerUnit - 1)
+        if (x + w < offset || x > offset + cw) continue
+        const y = yForIdx(staffIndex(n.midi).idx)
+        ctx.fillRect(x, y - 2, w, 4)
+      }
+      ctx.globalAlpha = 1
     }
 
     // A chord (notes sharing a start) takes ONE stem direction so its stems
@@ -327,6 +356,20 @@ export function PianoRoll({
     for (let u = uFrom; u <= uTo; u += beatStep) {
       ctx.fillStyle = u % 16 === 0 ? col.bar : col.beat
       ctx.fillRect(u * pxPerUnit, 0, 1, H)
+    }
+    // the other voices, as quiet silhouettes behind this one
+    if (view.ghosts && ghosts.length) {
+      ctx.fillStyle = col.ink
+      ctx.globalAlpha = 0.14
+      for (const n of ghosts) {
+        const x = n.start * pxPerUnit
+        const w = Math.max(2, n.dur * pxPerUnit - 1)
+        if (x + w < offset || x > offset + cw) continue
+        const r = rowForNote(n)
+        if (r < 0) continue
+        ctx.fillRect(x + 0.5, r * rowH + 1, w, rowH - 2)
+      }
+      ctx.globalAlpha = 1
     }
     ctx.fillStyle = instrumentColor(instrument)
     for (const n of derived.notes) {
@@ -978,6 +1021,16 @@ export function PianoRoll({
             </button>
           </span>
         )}
+        <span className="roll-tool">
+          <button
+            className={`icon-btn ${view.ghosts ? 'active' : ''}`}
+            aria-label="Toggle ghost notes"
+            data-tip={view.ghosts ? 'Hide the other voices' : 'Show the other voices as grey silhouettes'}
+            onClick={() => setRollView({ ghosts: !view.ghosts })}
+          >
+            <Ghost size={13} />
+          </button>
+        </span>
         <span className="roll-tool">
           Note length
           <NumberInput
