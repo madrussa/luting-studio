@@ -21,7 +21,9 @@ import { useActivePlayback } from '../lib/usePlayback'
 import { useRollView, setRollView, getRollView, clampZoom } from '../lib/rollView'
 import { useTheme, canvasColors } from '../lib/theme'
 import { instrumentColor } from './Timeline'
-import { Minus, Plus, TriangleAlert, LayoutGrid, Music, Ghost } from 'lucide-react'
+import { Minus, Plus, TriangleAlert, LayoutGrid, Music, Ghost, Drum } from 'lucide-react'
+import { DRUM_PATTERNS, patternRollNotes } from '../lib/drumPatterns'
+import type { DrumPattern } from '../lib/drumPatterns'
 import { NumberInput } from './NumberInput'
 import { keyById, keyFlattens } from '../lib/keys'
 
@@ -105,6 +107,7 @@ export function PianoRoll({
   const H = mode === 'staff' ? STAFF_H : rows * rowH
 
   const [noteLen, setNoteLen] = useState(4)
+  const [patternsOpen, setPatternsOpen] = useState(false)
   const [flash, setFlash] = useState<{ text: string; warn: boolean } | null>(null)
   const flashTimer = useRef(0)
   const [viewW, setViewW] = useState(600)
@@ -638,6 +641,15 @@ export function PianoRoll({
   const warn = (msg: string) => showFlash(msg, true)
   const info = (msg: string) => showFlash(msg, false)
 
+  // append a preset drum-machine bar at the next bar boundary
+  const addPattern = (p: DrumPattern) => {
+    setPatternsOpen(false)
+    const end = derived.notes.reduce((m, n) => Math.max(m, n.start + n.dur), 0)
+    const at = Math.ceil(end / p.barUnits) * p.barUnits
+    commit([...derived.notes, ...patternRollNotes(p, at)])
+    info(`Added a ${p.label} bar at bar ${Math.floor(at / p.barUnits) + 1} — click again for another.`)
+  }
+
   // the note under a grid position, if any
   const hitNoteAt = (u: number, pos: number) =>
     derived.notes.find((n) => {
@@ -1019,6 +1031,28 @@ export function PianoRoll({
             >
               <Music size={13} />
             </button>
+          </span>
+        )}
+        {isDrum && (
+          <span className="roll-tool export-wrap">
+            <button
+              className={`btn small ${patternsOpen ? 'active-btn' : ''}`}
+              data-tip="Append a classic drum-machine bar (kick/snare/hats) at the next bar"
+              onClick={() => setPatternsOpen(!patternsOpen)}
+            >
+              <Drum size={13} />
+              Patterns
+            </button>
+            {patternsOpen && (
+              <div className="export-menu" role="menu">
+                {DRUM_PATTERNS.map((p) => (
+                  <button key={p.id} className="btn" onClick={() => addPattern(p)}>
+                    {p.label}
+                    <span className="export-note">{p.barUnits === 12 ? '3/4 bar' : '1 bar'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </span>
         )}
         <span className="roll-tool">
