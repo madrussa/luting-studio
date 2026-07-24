@@ -1821,3 +1821,7 @@ select {
 .midi-row.midi-check input {
   accent-color: var(--accent);
 }
+
+.chords-pop {
+  width: 300px;
+}
