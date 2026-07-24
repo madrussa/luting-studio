@@ -76,6 +76,18 @@ function StudioHelp() {
       </div>
 
       <div className="help-section">
+        <div className="help-title">MIDI keyboard</div>
+        <ul className="help-list">
+          <li><strong>MIDI</strong> (top bar) connects a hardware keyboard or pad controller (Chrome/Edge only). Once connected it stays live even with the panel closed — pick any of the 20 voices and play it in real time.</li>
+          <li>No hardware handy? The <strong>on-screen keyboard</strong> in the MIDI panel is a two-octave virtual device — click the keys or play the computer keyboard (<code>a s d f …</code> white keys, <code>w e t y …</code> black keys, <Key k="Z" />/<Key k="X" /> shift octaves), with a velocity slider. It behaves exactly like a plugged-in keyboard, recording included, and works in any browser.</li>
+          <li><strong>Record a take</strong> captures what you play and adds it to the board as new voice(s). The take starts on your <strong>first note</strong> — no count-in — and notes are quantized to the luting grid (one <code>t1</code> unit = 60/BPM seconds), with simultaneous equal-length notes becoming chords and other overlaps split into extra voices, like the MIDI file converter.</li>
+          <li>With the <strong>Drumkit</strong> voice selected, pads sending General MIDI drum notes land on the matching luteboi drum (kick, snare, hats…).</li>
+          <li>Key velocity is kept: it sets how loud live notes play and becomes the recorded voice's <code>v</code> volume.</li>
+          <li>In <strong>Quality</strong> mode, live notes play the real LuteBoi samples — sustained voices loop while the key is held. The built-in synth fills in while a pack is still downloading (and always covers Lute, Bass, Chiptune and Percussion, which LuteBoi synthesizes too).</li>
+        </ul>
+      </div>
+
+      <div className="help-section">
         <div className="help-title">Library &amp; saving</div>
         <ul className="help-list">
           <li>The working board auto-saves in this browser. The <strong>Library</strong> stores named songs durably — save, save copies, load, delete (click the trash twice).</li>

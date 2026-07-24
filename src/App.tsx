@@ -3,6 +3,8 @@ import { InstrumentPalette } from './components/InstrumentPalette'
 import { VoiceBoard } from './components/VoiceBoard'
 import { Converter } from './components/Converter'
 import { OutputPanel } from './components/OutputPanel'
+import { MidiPanel } from './components/MidiPanel'
+import type { RecordResult } from './lib/midiRecord'
 import type { ConvertResult } from './lib/convert'
 import { importLuting, instrumentByCode, serializeVoiceBody } from './lib/luting'
 import { scheduledToRollNotes, notesToEvents, dominantVolume } from './lib/transform'
@@ -317,6 +319,22 @@ export default function App() {
     setImportOpen(false)
   }
 
+  // A finished MIDI take lands on the board as new voice(s); the existing
+  // editing tools (piano roll, transpose, optimizer) take it from there.
+  const handleMidiRecorded = (result: RecordResult) => {
+    if (result.warnings.length > 0) setImportWarnings(result.warnings)
+    if (result.voices.length === 0) return
+    setVoices((vs) => [
+      ...vs,
+      ...result.voices.map((v) => ({
+        id: newVoiceId(),
+        instrument: v.instrument,
+        body: v.body,
+        label: v.label,
+      })),
+    ])
+  }
+
   const handleLoadLuting = (text: string) => {
     const r = importLuting(text)
     handleImport({ bpm: r.bpm, voices: r.voices.map((v) => ({ ...v, noteCount: 0 })), warnings: r.warnings })
@@ -471,6 +489,7 @@ export default function App() {
             {justSaved ? <Check size={15} /> : <LibraryIcon size={15} />}
             {justSaved ? 'Saved' : 'Library'}
           </button>
+          <MidiPanel bpm={bpm} onRecorded={handleMidiRecorded} />
           <button className="btn primary" data-tip-pos="right" onClick={() => setImportOpen(true)}>
             <Import size={15} />
             Import / Convert

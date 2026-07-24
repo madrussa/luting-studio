@@ -5,7 +5,7 @@ import { parseLuting, DRUM_SOUNDS } from './luting'
 import type { ScheduledNote } from './luting'
 import { getPlaybackMode, getBank, loadBank, scheduleSampled } from './samples'
 
-interface SynthConfig {
+export interface SynthConfig {
   wave: OscillatorType
   style: 'pluck' | 'sustain'
   /** lowpass cutoff as a multiple of the note frequency */
@@ -43,7 +43,7 @@ interface SynthConfig {
 // harmonic spectrum). Notable measured truths: Bean/Overdriven/Slap Bass play
 // an octave below written; Choir/Harmonica/Horn/Slap Bass/Bean/Cat have
 // formant resonances; Bell/Vibraphone/Ocarina are near-pure sines.
-const SYNTHS: Record<string, SynthConfig> = {
+export const SYNTHS: Record<string, SynthConfig> = {
   // bright plucked string: strong h2/h4 (1, .79, .17, .39), decays to ~17% by 0.85s
   l: { wave: 'sawtooth', style: 'pluck', cutoff: 4.5, release: 0.3, gain: 0.9, decay: 1.3 },
   // additive in luteboi (pysynth_b): h2 dominant (~.5) + h3/h4 (~.12/.14), no
@@ -100,13 +100,25 @@ function getNoise(ctx: BaseAudioContext): AudioBuffer {
   return noiseBuffer
 }
 
-function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
-  const cfg = SYNTHS[n.instrument] ?? SYNTHS.l
-  const freq = 440 * Math.pow(2, ((n.midi ?? 60) - 69) / 12 + (cfg.octaveShift ?? 0))
-  const start = t0 + n.timeSec
-  const holdEnd = start + Math.max(0.03, n.durSec - 0.02)
-  const stopAt = holdEnd + (cfg.style === 'pluck' ? Math.max(cfg.release, 0.1) : cfg.release) + 0.05
+/**
+ * Build the oscillator/filter/vibrato graph for a melodic instrument, started
+ * at `start` with the envelope gain node left at 0 for the caller to automate.
+ * Shared by the scheduled preview (which knows the note's duration upfront)
+ * and the live MIDI synth (which doesn't — a key release ends the note).
+ * `stop(at)` (re-)schedules the end of every source in the graph.
+ */
+export interface MelodicGraph {
+  gain: GainNode
+  stop: (at: number) => void
+}
 
+export function buildMelodicGraph(
+  ctx: AudioContext,
+  dest: AudioNode,
+  cfg: SynthConfig,
+  freq: number,
+  start: number
+): MelodicGraph {
   const gain = ctx.createGain()
   const filter = ctx.createBiquadFilter()
   let bodyFilter: BiquadFilterNode | null = null
@@ -129,23 +141,9 @@ function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
   }
   filter.connect(gain)
   gain.connect(dest)
+  gain.gain.value = 0
 
-  const peak = cfg.gain * n.volume * 0.22
-  const atk = cfg.attack ?? (cfg.style === 'pluck' ? 0.005 : 0.04)
-  const g = gain.gain
-  g.setValueAtTime(0, start)
-  if (cfg.style === 'pluck') {
-    g.linearRampToValueAtTime(peak, start + atk)
-    // decay at the instrument's own rate, cut short by the note's end
-    const decayEnd = Math.min(start + atk + (cfg.decay ?? 2.5), holdEnd + cfg.release)
-    g.exponentialRampToValueAtTime(Math.max(peak * 0.05, 0.001), decayEnd)
-    g.linearRampToValueAtTime(0, stopAt)
-  } else {
-    g.linearRampToValueAtTime(peak, start + atk)
-    g.setValueAtTime(peak, holdEnd)
-    g.linearRampToValueAtTime(0, holdEnd + cfg.release)
-  }
-
+  const sources: AudioScheduledSourceNode[] = []
   const oscs: OscillatorNode[] = []
   const main = ctx.createOscillator()
   main.type = cfg.wave
@@ -182,8 +180,7 @@ function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
     noise.connect(band)
     band.connect(noiseGain)
     noiseGain.connect(filter)
-    noise.start(start)
-    noise.stop(stopAt)
+    sources.push(noise)
   }
   if (cfg.vibrato) {
     const lfo = ctx.createOscillator()
@@ -192,15 +189,52 @@ function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
     lfoGain.gain.value = (cfg.vibrato / 1200) * freq
     lfo.connect(lfoGain)
     lfoGain.connect(main.frequency)
-    lfo.start(start)
-    lfo.stop(stopAt)
+    sources.push(lfo)
   }
   for (const o of oscs) {
     o.connect(filter)
     if (bodyFilter) o.connect(bodyFilter)
-    o.start(start)
-    o.stop(stopAt)
+    sources.push(o)
   }
+  for (const s of sources) s.start(start)
+  return {
+    gain,
+    stop: (at: number) => {
+      for (const s of sources) {
+        try {
+          s.stop(at)
+        } catch {
+          // source already ended; nothing to stop
+        }
+      }
+    },
+  }
+}
+
+function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
+  const cfg = SYNTHS[n.instrument] ?? SYNTHS.l
+  const freq = 440 * Math.pow(2, ((n.midi ?? 60) - 69) / 12 + (cfg.octaveShift ?? 0))
+  const start = t0 + n.timeSec
+  const holdEnd = start + Math.max(0.03, n.durSec - 0.02)
+  const stopAt = holdEnd + (cfg.style === 'pluck' ? Math.max(cfg.release, 0.1) : cfg.release) + 0.05
+
+  const { gain, stop } = buildMelodicGraph(ctx, dest, cfg, freq, start)
+  const peak = cfg.gain * n.volume * 0.22
+  const atk = cfg.attack ?? (cfg.style === 'pluck' ? 0.005 : 0.04)
+  const g = gain.gain
+  g.setValueAtTime(0, start)
+  if (cfg.style === 'pluck') {
+    g.linearRampToValueAtTime(peak, start + atk)
+    // decay at the instrument's own rate, cut short by the note's end
+    const decayEnd = Math.min(start + atk + (cfg.decay ?? 2.5), holdEnd + cfg.release)
+    g.exponentialRampToValueAtTime(Math.max(peak * 0.05, 0.001), decayEnd)
+    g.linearRampToValueAtTime(0, stopAt)
+  } else {
+    g.linearRampToValueAtTime(peak, start + atk)
+    g.setValueAtTime(peak, holdEnd)
+    g.linearRampToValueAtTime(0, holdEnd + cfg.release)
+  }
+  stop(stopAt)
 }
 
 // The lute has no sample pack — LuteBoi synthesizes it with Karplus-Strong
@@ -215,7 +249,7 @@ function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
 // natural ring doesn't overlap forever. Cached per pitch+length like LuteBoi's.
 const ksCache = new Map<string, AudioBuffer>()
 
-function karplusBuffer(ctx: BaseAudioContext, freq: number, durSec: number): AudioBuffer {
+export function karplusBuffer(ctx: BaseAudioContext, freq: number, durSec: number): AudioBuffer {
   const sr = ctx.sampleRate
   const key = `${sr}:${Math.round(freq * 100)}:${Math.round(durSec * 100)}`
   const hit = ksCache.get(key)
@@ -286,7 +320,7 @@ function scheduleKarplus(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
 // (exp(-x/1000) ≈ 23ms time constant), gone by ~70ms. Pitch only set the burst
 // length there, so we ignore it. A pitched triangle (the old SYNTHS.p) was the
 // wrong primitive — no config could turn a harmonic tone into broadband noise.
-function scheduleNoisePerc(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
+export function scheduleNoisePerc(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
   const start = t0 + n.timeSec
   const src = ctx.createBufferSource()
   src.buffer = getNoise(ctx)
@@ -358,7 +392,7 @@ function pitchedHit(
   osc.stop(start + dur + 0.02)
 }
 
-function scheduleDrum(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
+export function scheduleDrum(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
   const sound = DRUM_SOUNDS[n.drum ?? '']
   if (!sound) return
   const start = t0 + n.timeSec
@@ -440,7 +474,7 @@ export interface PlayOptions {
 // ---- global volume --------------------------------------------------------
 
 const VOL_KEY = 'luting-volume'
-const BASE_GAIN = 0.5
+export const BASE_GAIN = 0.5
 
 let masterVolume = (() => {
   try {

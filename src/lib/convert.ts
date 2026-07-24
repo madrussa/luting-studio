@@ -50,8 +50,9 @@ function gmToInstrument(program: number): string {
   return 'k'
 }
 
-// GM percussion key -> drumkit pitch (octave + letter)
-const GM_DRUM: Record<number, Pitch> = {
+// GM percussion key -> drumkit pitch (octave + letter). Also used by the live
+// MIDI keyboard input so drum pads land on the right luteboi drum.
+export const GM_DRUM: Record<number, Pitch> = {
   35: { octave: 0, letter: 'b' }, // acoustic bass drum -> hollow kick
   36: { octave: 0, letter: 'a' }, // bass drum -> kick
   37: { octave: 2, letter: 'a' }, // side stick -> rim
@@ -103,7 +104,7 @@ interface QuantNote {
   isDrum: boolean
 }
 
-interface SubVoice {
+export interface SubVoice {
   events: VoiceEvent[]
   nextFree: number
   velocities: number[]
@@ -112,8 +113,9 @@ interface SubVoice {
 /**
  * Greedy sub-voice allocation: each (start, dur, pitches) group goes to the
  * first sub-voice that is free at its start time; gaps become rests.
+ * Shared with the live MIDI recorder.
  */
-function allocate(groups: { start: number; dur: number; pitches: Pitch[]; velocity: number }[]): SubVoice[] {
+export function allocate(groups: { start: number; dur: number; pitches: Pitch[]; velocity: number }[]): SubVoice[] {
   const subs: SubVoice[] = []
   for (const g of groups.sort((a, b) => a.start - b.start)) {
     let sub = subs.find((s) => s.nextFree <= g.start)

@@ -15,6 +15,16 @@ notation used by [luteboi.com](https://luteboi.com/)
   grid, simultaneous equal-length notes become chords, overlapping lines are
   split into extra voices, and the GM drum channel is mapped onto the
   luteboi Drumkit (`id`).
+- **MIDI keyboard → luting** (Chrome/Edge) — connect a hardware keyboard or
+  pad controller, play any of the 20 voices live, and record takes straight
+  onto the board. Takes start on the first note, quantize to the `#lute`
+  grid, group simultaneous notes into chords, spill other overlaps into
+  extra voices, and keep key velocity as the voice volume. Drum pads
+  sending GM percussion notes land on the matching Drumkit sound. In
+  Quality mode live notes play the real samples (looped while a key is
+  held), with the synth filling in while packs load. An **on-screen
+  keyboard** (any browser) doubles as a simulated MIDI device — mouse or
+  computer-keyboard playable, velocity slider, octave shift.
 - **MP3/audio → luting** — best-effort monophonic transcription using
   autocorrelation pitch detection. Works on clean single-line audio
   (whistling, humming, one instrument); full mixes won't transcribe. Set the
