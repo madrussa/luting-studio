@@ -95,6 +95,20 @@ export interface SerializeOptions {
   volume?: number
 }
 
+/**
+ * A duration as luting text: integers as-is, halves/thirds/quarters as
+ * fractions ("5/2"). Swing pairs and other off-grid feels need these.
+ */
+function durStr(d: number): string {
+  if (Number.isInteger(d)) return String(d)
+  for (const den of [2, 3, 4]) {
+    const n = d * den
+    if (Math.abs(n - Math.round(n)) < 1e-9) return `${Math.round(n)}/${den}`
+  }
+  // last resort: nearest quarter-unit so the output always parses
+  return `${Math.max(1, Math.round(d * 4))}/4`
+}
+
 export function serializeVoiceBody(events: VoiceEvent[], opts: SerializeOptions = {}): string {
   if (events.length === 0) return ''
 
@@ -111,7 +125,7 @@ export function serializeVoiceBody(events: VoiceEvent[], opts: SerializeOptions 
 
   let out = ''
   if (opts.volume && opts.volume >= 1 && opts.volume <= 9) out += `v${opts.volume}`
-  if (defaultDur !== 1) out += `t${defaultDur}`
+  if (defaultDur !== 1) out += `t${durStr(defaultDur)}`
 
   let oct = 4
   let octKnown = true
@@ -127,7 +141,7 @@ export function serializeVoiceBody(events: VoiceEvent[], opts: SerializeOptions 
   }
 
   for (const e of events) {
-    const durSuffix = e.duration === defaultDur ? '' : String(e.duration)
+    const durSuffix = e.duration === defaultDur ? '' : durStr(e.duration)
     if (e.type === 'rest') {
       out += `r${durSuffix}`
       continue

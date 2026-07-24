@@ -117,6 +117,88 @@ export function locateNoteAt(body: string, caret: number): { from: number; count
 }
 
 /**
+ * Swing (or straighten) a voice's eighth pairs. In this app's convention one
+ * t1 unit is a sixteenth, so an eighth is 2 units and a swing pair becomes
+ * 5/2 + 3/2 (the classic long-short triplet feel; it's the same notation the
+ * Help table documents). Everything runs on a half-unit integer grid so the
+ * math is exact:
+ *   - an on-beat eighth extends to 5 halves (when there's room),
+ *   - an off-beat eighth shifts late and shrinks to 3 halves,
+ *   - a short off-beat hit (e.g. a drum hat, 1 unit) just shifts late.
+ * Notes that don't sit on eighth positions are left alone, and the result is
+ * validated to stay non-overlapping — if anything would collide, the voice is
+ * returned unchanged (null = nothing to do / can't apply).
+ */
+export function swingBody(
+  parsedNotes: ScheduledNote[],
+  bpm: number,
+  mode: 'swing' | 'straighten',
+  isDrum: boolean
+): string | null {
+  if (parsedNotes.length === 0) return null
+  const half = 60 / bpm / 2
+
+  // group simultaneous equal-length notes into chord events on the half grid
+  const groups = new Map<string, { start: number; dur: number; notes: ScheduledNote[] }>()
+  for (const n of parsedNotes) {
+    const start = Math.round(n.timeSec / half)
+    const dur = Math.max(1, Math.round(n.durSec / half))
+    const key = `${start}:${dur}`
+    const g = groups.get(key)
+    if (g) g.notes.push(n)
+    else groups.set(key, { start, dur, notes: [n] })
+  }
+  const evs = [...groups.values()].sort((a, b) => a.start - b.start)
+
+  let changed = false
+  const orig = evs.map((e) => ({ start: e.start, dur: e.dur }))
+  for (let i = 0; i < evs.length; i++) {
+    const e = evs[i]
+    const o = orig[i]
+    const next = orig[i + 1]
+    if (mode === 'swing') {
+      if (o.start % 8 === 0 && o.dur === 4 && (!next || next.start >= o.start + 5 || (next.start === o.start + 4 && next.dur === 4))) {
+        e.dur = 5
+        changed = true
+      } else if (o.start % 8 === 4 && o.dur === 4) {
+        e.start += 1
+        e.dur = 3
+        changed = true
+      } else if (o.start % 8 === 4 && o.dur < 4 && (!next || next.start >= o.start + o.dur + 1)) {
+        e.start += 1 // short off-beat hit: just play it late
+        changed = true
+      }
+    } else {
+      if (o.start % 8 === 0 && o.dur === 5) {
+        e.dur = 4
+        changed = true
+      } else if (o.start % 8 === 5 && o.dur === 3) {
+        e.start -= 1
+        e.dur = 4
+        changed = true
+      } else if (o.start % 8 === 5 && o.dur < 3) {
+        e.start -= 1
+        changed = true
+      }
+    }
+  }
+  if (!changed) return null
+  for (let i = 1; i < evs.length; i++) {
+    if (evs[i - 1].start + evs[i - 1].dur > evs[i].start) return null // would collide
+  }
+
+  const events: VoiceEvent[] = []
+  let cursor = 0
+  for (const g of evs) {
+    if (g.start > cursor) events.push({ type: 'rest', pitches: [], duration: (g.start - cursor) / 2 })
+    const pitches = g.notes.map((n) => (isDrum ? drumKeyToPitch(n.drum!) : midiToPitch(n.midi!)))
+    events.push({ type: pitches.length > 1 ? 'chord' : 'note', pitches, duration: g.dur / 2 })
+    cursor = g.start + g.dur
+  }
+  return serializeVoiceBody(events, { volume: dominantVolume(parsedNotes) })
+}
+
+/**
  * Shift every pitch in a voice by N semitones and re-serialize its body.
  * Returns null if any note would leave the playable o1–o7 range.
  */

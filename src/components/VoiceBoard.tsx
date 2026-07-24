@@ -4,8 +4,8 @@ import { PianoRoll } from './PianoRoll'
 import { VoiceStrip } from './VoiceStrip'
 import { parseLuting } from '../lib/luting'
 import type { ParseResult } from '../lib/luting'
-import { GripVertical, Piano, Volume2, VolumeX, Play, Square, X, ChevronUp, ChevronDown } from 'lucide-react'
-import { transposeBody, locateNoteAt } from '../lib/transform'
+import { GripVertical, Piano, Volume2, VolumeX, Play, Square, X, ChevronUp, ChevronDown, Waves } from 'lucide-react'
+import { transposeBody, locateNoteAt, swingBody } from '../lib/transform'
 import EditorImport from 'react-simple-code-editor'
 // react-simple-code-editor ships only CJS; under Vite's rolldown interop the
 // default import can arrive as the module namespace ({ default }), so unwrap it.
@@ -44,6 +44,8 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax, songKey
   const [drop, setDrop] = useState<{ index: number; swapId: string | null } | null>(null)
   // id of the voice awaiting a remove confirmation, or null when the dialog is closed
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [swingOpen, setSwingOpen] = useState(false)
+  const [swingMsg, setSwingMsg] = useState<string | null>(null)
   const confirmVoice = voices.find((v) => v.id === confirmId) ?? null
   const confirmBackdrop = useBackdropClose(() => setConfirmId(null))
 
@@ -102,6 +104,38 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax, songKey
     () => Math.max(64, Math.ceil(parsed.durationSec / (60 / parsed.bpm)) + 16),
     [parsed]
   )
+
+  // Swing/straighten the whole song's eighth pairs (5/2+3/2 <-> 2+2).
+  const applySwing = (mode: 'swing' | 'straighten') => {
+    setSwingOpen(false)
+    const notices: string[] = []
+    let applied = 0
+    const next = voices.map((v, idx) => {
+      if (v.body.trim() === '') return v
+      if (/[@~]/.test(v.body)) {
+        notices.push(`"${v.label || 'voice'}" has tempo changes (@) or fades (~) — left alone.`)
+        return v
+      }
+      const body = swingBody(
+        parsed.notes.filter((n) => n.voice === idx),
+        parsed.bpm,
+        mode,
+        v.instrument === 'd'
+      )
+      if (body === null) return v
+      if (/[A-Z]/.test(v.body)) notices.push(`"${v.label || 'voice'}": macros were expanded to plain notes.`)
+      applied++
+      return { ...v, body }
+    })
+    if (applied > 0) setVoices(next)
+    const what = mode === 'swing' ? 'Swung' : 'Straightened'
+    setSwingMsg(
+      applied > 0
+        ? [`${what} the eighths in ${applied} voice${applied === 1 ? '' : 's'}.`, ...notices].join(' ')
+        : `No eighth pairs to ${mode} — notes must sit on the eighth grid (2 units at this BPM).`
+    )
+    setTimeout(() => setSwingMsg(null), 5000)
+  }
 
   const soloVoice = (idx: number, id: string, startAt?: number) => {
     playLuting(fullLuting, { id, soloVoice: idx, startAt })
@@ -179,6 +213,26 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax, songKey
           Voices <span className="panel-sub">each plays at the same time, separated by |</span>
         </div>
         <div className="board-controls">
+          <div className="export-wrap">
+            <button
+              className={`btn ${swingOpen ? 'active-btn' : ''}`}
+              data-tip="Swing or straighten the whole song's eighth notes"
+              onClick={() => setSwingOpen(!swingOpen)}
+            >
+              <Waves size={14} />
+              Swing
+            </button>
+            {swingOpen && (
+              <div className="export-menu" role="menu">
+                <button className="btn" onClick={() => applySwing('swing')}>
+                  Swing eighths <span className="export-note">2+2 → 5/2+3/2</span>
+                </button>
+                <button className="btn" onClick={() => applySwing('straighten')}>
+                  Straighten <span className="export-note">5/2+3/2 → 2+2</span>
+                </button>
+              </div>
+            )}
+          </div>
           {staffView && (
             <label className="bpm-control" data-tip="Notation key — flattens the right notes for you in staff view (flat keys only for now). Shift-click overrides.">
               Key
@@ -197,6 +251,8 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax, songKey
           </label>
         </div>
       </div>
+
+      {swingMsg && <div className="roll-note warning">{swingMsg}</div>}
 
       <div
         className={`voice-list ${drop ? 'drag-over' : ''}`}
