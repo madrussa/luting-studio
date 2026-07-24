@@ -21,7 +21,9 @@ import { useActivePlayback } from '../lib/usePlayback'
 import { useRollView, setRollView, getRollView, clampZoom } from '../lib/rollView'
 import { useTheme, canvasColors } from '../lib/theme'
 import { instrumentColor } from './Timeline'
-import { Minus, Plus, TriangleAlert, LayoutGrid, Music } from 'lucide-react'
+import { Minus, Plus, TriangleAlert, LayoutGrid, Music, Ghost, Drum } from 'lucide-react'
+import { DRUM_PATTERNS, patternRollNotes } from '../lib/drumPatterns'
+import type { DrumPattern } from '../lib/drumPatterns'
 import { NumberInput } from './NumberInput'
 import { keyById, keyFlattens } from '../lib/keys'
 
@@ -59,6 +61,8 @@ const midiForIdx = (idx: number, flat: boolean): number => {
 
 interface Props {
   notes: ScheduledNote[]
+  /** the other voices' notes, drawn as grey silhouettes when ghosts are on */
+  ghostNotes?: ScheduledNote[]
   bpm: number
   instrument: string
   body: string
@@ -77,6 +81,7 @@ interface Props {
 
 export function PianoRoll({
   notes: parsedNotes,
+  ghostNotes,
   bpm,
   instrument,
   body,
@@ -102,6 +107,8 @@ export function PianoRoll({
   const H = mode === 'staff' ? STAFF_H : rows * rowH
 
   const [noteLen, setNoteLen] = useState(4)
+  const [patternsOpen, setPatternsOpen] = useState(false)
+  const [patternBars, setPatternBars] = useState(1)
   const [flash, setFlash] = useState<{ text: string; warn: boolean } | null>(null)
   const flashTimer = useRef(0)
   const [viewW, setViewW] = useState(600)
@@ -143,6 +150,16 @@ export function PianoRoll({
     () => ({ notes: scheduledToRollNotes(parsedNotes, bpm), volume: dominantVolume(parsedNotes) }),
     [parsedNotes, bpm]
   )
+
+  // other voices' notes, same-kind only (drum rows mean nothing to a melody
+  // and vice versa), drawn behind this voice's notes when ghosts are on
+  const ghosts = useMemo(() => {
+    if (!ghostNotes) return []
+    return scheduledToRollNotes(
+      ghostNotes.filter((n) => (isDrum ? n.drum !== undefined : n.midi !== undefined)),
+      bpm
+    )
+  }, [ghostNotes, bpm, isDrum])
 
   const rowForNote = (n: RollNote) => (isDrum ? DRUM_KEYS.indexOf(n.drum!) : MIDI_MAX - (n.midi ?? 60))
   // stable identity for selection (two notes can't share start+dur+pitch)
@@ -211,6 +228,22 @@ export function PianoRoll({
       if (idx >= 21 && idx <= 22) line(21) // middle C
       for (let p = 33; p <= idx; p += 2) line(p)
       for (let p = 9; p >= idx; p -= 2) line(p)
+    }
+
+    // ghost voices: just their faint duration bars at pitch height, so the
+    // harmony context reads without notation clutter
+    if (view.ghosts && ghosts.length) {
+      ctx.fillStyle = col.ink
+      ctx.globalAlpha = 0.13
+      for (const n of ghosts) {
+        if (n.midi === undefined) continue
+        const x = n.start * pxPerUnit
+        const w = Math.max(2, n.dur * pxPerUnit - 1)
+        if (x + w < offset || x > offset + cw) continue
+        const y = yForIdx(staffIndex(n.midi).idx)
+        ctx.fillRect(x, y - 2, w, 4)
+      }
+      ctx.globalAlpha = 1
     }
 
     // A chord (notes sharing a start) takes ONE stem direction so its stems
@@ -327,6 +360,20 @@ export function PianoRoll({
     for (let u = uFrom; u <= uTo; u += beatStep) {
       ctx.fillStyle = u % 16 === 0 ? col.bar : col.beat
       ctx.fillRect(u * pxPerUnit, 0, 1, H)
+    }
+    // the other voices, as quiet silhouettes behind this one
+    if (view.ghosts && ghosts.length) {
+      ctx.fillStyle = col.ink
+      ctx.globalAlpha = 0.14
+      for (const n of ghosts) {
+        const x = n.start * pxPerUnit
+        const w = Math.max(2, n.dur * pxPerUnit - 1)
+        if (x + w < offset || x > offset + cw) continue
+        const r = rowForNote(n)
+        if (r < 0) continue
+        ctx.fillRect(x + 0.5, r * rowH + 1, w, rowH - 2)
+      }
+      ctx.globalAlpha = 1
     }
     ctx.fillStyle = instrumentColor(instrument)
     for (const n of derived.notes) {
@@ -594,6 +641,17 @@ export function PianoRoll({
   }
   const warn = (msg: string) => showFlash(msg, true)
   const info = (msg: string) => showFlash(msg, false)
+
+  // append preset drum-machine bars at the next bar boundary
+  const addPattern = (p: DrumPattern) => {
+    setPatternsOpen(false)
+    const end = derived.notes.reduce((m, n) => Math.max(m, n.start + n.dur), 0)
+    const at = Math.ceil(end / p.barUnits) * p.barUnits
+    commit([...derived.notes, ...patternRollNotes(p, at, patternBars)])
+    info(
+      `Added ${patternBars} ${p.label} bar${patternBars === 1 ? '' : 's'} at bar ${Math.floor(at / p.barUnits) + 1} — click again for more.`
+    )
+  }
 
   // the note under a grid position, if any
   const hitNoteAt = (u: number, pos: number) =>
@@ -978,6 +1036,42 @@ export function PianoRoll({
             </button>
           </span>
         )}
+        {isDrum && (
+          <span className="roll-tool export-wrap">
+            <button
+              className={`btn small ${patternsOpen ? 'active-btn' : ''}`}
+              data-tip="Append a classic drum-machine bar (kick/snare/hats) at the next bar"
+              onClick={() => setPatternsOpen(!patternsOpen)}
+            >
+              <Drum size={13} />
+              Patterns
+            </button>
+            {patternsOpen && (
+              <div className="export-menu align-left" role="menu">
+                <label className="midi-row" data-tip="How many bars of the pattern to lay down per click">
+                  Bars
+                  <NumberInput value={patternBars} onChange={setPatternBars} min={1} max={32} ariaLabel="Bars of the pattern to add" />
+                </label>
+                {DRUM_PATTERNS.map((p) => (
+                  <button key={p.id} className="btn" onClick={() => addPattern(p)}>
+                    {p.label}
+                    <span className="export-note">{p.barUnits === 12 ? '3/4' : '4/4'} × {patternBars}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+        )}
+        <span className="roll-tool">
+          <button
+            className={`icon-btn ${view.ghosts ? 'active' : ''}`}
+            aria-label="Toggle ghost notes"
+            data-tip={view.ghosts ? 'Hide the other voices' : 'Show the other voices as grey silhouettes'}
+            onClick={() => setRollView({ ghosts: !view.ghosts })}
+          >
+            <Ghost size={13} />
+          </button>
+        </span>
         <span className="roll-tool">
           Note length
           <NumberInput

@@ -84,6 +84,28 @@ describe('createMidiRecorder', () => {
     expect(notes.map((n) => n.drum)).toEqual(['o0a', 'o3c']) // kick, snare
   })
 
+  it('anchors to an explicit grid zero (count-in / overdub mode)', () => {
+    const anchor = 10000
+    const rec = createMidiRecorder(BPM, 'l', { anchorMs: anchor })
+    // played during the count-in and released before it ends: dropped
+    rec.noteOn(50, 0.8, anchor - UNIT * 2)
+    rec.noteOff(50, anchor - UNIT)
+    // held across the anchor: starts at 0, only the post-anchor part counts
+    rec.noteOn(60, 0.8, anchor - UNIT)
+    rec.noteOff(60, anchor + UNIT)
+    // played one beat (4 units) into the take: lands at unit 4, not unit 0
+    rec.noteOn(64, 0.8, anchor + UNIT * 4)
+    rec.noteOff(64, anchor + UNIT * 5)
+    const r = rec.finish(anchor + UNIT * 6)
+
+    const notes = parseLuting(`#lute ${BPM} il${r.voices[0].body}`).notes
+    const unitSec = 60 / BPM
+    expect(notes.map((n) => [n.midi, Math.round(n.timeSec / unitSec), Math.round(n.durSec / unitSec)])).toEqual([
+      [60, 0, 1],
+      [64, 4, 1],
+    ])
+  })
+
   it('records velocity as the voice volume', () => {
     const rec = createMidiRecorder(BPM, 'l')
     rec.noteOn(60, 0.5, 0)

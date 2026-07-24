@@ -1784,3 +1784,51 @@ select {
   color: var(--danger);
   border-color: var(--danger);
 }
+
+/* ---- export menu --------------------------------------------------------- */
+
+.export-wrap {
+  position: relative;
+}
+.export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  min-width: 220px;
+}
+.export-menu .btn {
+  justify-content: flex-start;
+}
+.export-note {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.midi-row.midi-check {
+  justify-content: flex-start;
+  cursor: pointer;
+}
+.midi-row.midi-check input {
+  accent-color: var(--accent);
+}
+
+.chords-pop {
+  width: 300px;
+}
+
+/* menus whose button sits near a clipping container's left edge open
+   left-aligned so they stay inside the scroll area */
+.export-menu.align-left {
+  left: 0;
+  right: auto;
+}

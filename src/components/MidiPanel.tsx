@@ -13,14 +13,17 @@ import {
   disableMidi,
 } from '../lib/midi'
 import type { MidiDevice } from '../lib/midi'
-import { ensureLiveAudio, liveNoteOn, liveNoteOff, stopAllLive } from '../lib/liveSynth'
+import { ensureLiveAudio, liveNoteOn, liveNoteOff, stopAllLive, startMetronome, stopMetronome } from '../lib/liveSynth'
 import { getPlaybackMode, subscribePlaybackMode, loadBank } from '../lib/samples'
+import { playLuting, stopPlayback, getActivePlaybackId } from '../lib/player'
 import { createMidiRecorder } from '../lib/midiRecord'
 import type { MidiRecorder, RecordResult } from '../lib/midiRecord'
 import { SimKeyboard } from './SimKeyboard'
 
 interface Props {
   bpm: number
+  /** the current board's luting, for overdub playback */
+  luting: string
   onRecorded: (result: RecordResult) => void
 }
 
@@ -29,7 +32,7 @@ interface Props {
  * on-screen simulator, play the luteboi voices live, and record takes onto
  * the board. Once enabled, input stays live even with the panel closed.
  */
-export function MidiPanel({ bpm, onRecorded }: Props) {
+export function MidiPanel({ bpm, luting, onRecorded }: Props) {
   const [open, setOpen] = useState(false)
   // the panel has been switched on (audio context is live); hardware access
   // may still be pending, denied, or unsupported — the simulator works anyway
@@ -39,6 +42,8 @@ export function MidiPanel({ bpm, onRecorded }: Props) {
   const [instrument, setInstrument] = useState('l')
   const [simOn, setSimOn] = useState(false)
   const [recording, setRecording] = useState(false)
+  const [metroOn, setMetroOn] = useState(false)
+  const [overdubOn, setOverdubOn] = useState(false)
   const [noteCount, setNoteCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
   // a dot that blinks when a key is pressed, as a "signal is arriving" check
@@ -47,6 +52,8 @@ export function MidiPanel({ bpm, onRecorded }: Props) {
   const instrumentRef = useRef(instrument)
   instrumentRef.current = instrument
   const recorderRef = useRef<MidiRecorder | null>(null)
+  // a pending count-in-delayed overdub playback start, so stop can cancel it
+  const overdubTimerRef = useRef<number | null>(null)
 
   // one subscription for the panel's lifetime: live-play every event, and
   // feed the recorder when a take is running
@@ -115,6 +122,8 @@ export function MidiPanel({ bpm, onRecorded }: Props) {
   // MIDI/USB devices" indicator). A running take is finished first, never lost.
   const disconnect = () => {
     if (recorderRef.current) toggleRecord()
+    stopMetronome()
+    stopOverdub()
     stopAllLive()
     setSimOn(false)
     setSimActive(false)
@@ -125,14 +134,44 @@ export function MidiPanel({ bpm, onRecorded }: Props) {
     setOpen(false)
   }
 
+  const stopOverdub = () => {
+    if (overdubTimerRef.current !== null) {
+      window.clearTimeout(overdubTimerRef.current)
+      overdubTimerRef.current = null
+    }
+    if (getActivePlaybackId() === 'overdub') stopPlayback()
+  }
+
   const toggleRecord = () => {
     if (recorderRef.current) {
+      stopMetronome()
+      stopOverdub()
       const result = recorderRef.current.finish(performance.now())
       recorderRef.current = null
       setRecording(false)
       onRecorded(result)
     } else {
-      recorderRef.current = createMidiRecorder(bpm, instrument)
+      // metronome: a 1-bar count-in whose end is the recording's grid zero
+      let anchorMs = metroOn ? startMetronome(bpm, 4).anchorMs : undefined
+      // overdub: play the song and align the grid to its start, so the take
+      // lands at the right song position (leading rests included)
+      if (overdubOn && luting) {
+        const startPlayback = () => {
+          overdubTimerRef.current = null
+          playLuting(luting, { id: 'overdub' })
+        }
+        const PLAY_LATENCY_MS = 80 // playLuting's own scheduling headroom
+        if (anchorMs !== undefined) {
+          overdubTimerRef.current = window.setTimeout(
+            startPlayback,
+            Math.max(0, anchorMs - performance.now() - PLAY_LATENCY_MS)
+          )
+        } else {
+          startPlayback()
+          anchorMs = performance.now() + PLAY_LATENCY_MS
+        }
+      }
+      recorderRef.current = createMidiRecorder(bpm, instrument, { anchorMs })
       setNoteCount(0)
       setRecording(true)
     }
@@ -200,6 +239,15 @@ export function MidiPanel({ bpm, onRecorded }: Props) {
                 {simOn ? 'Hide on-screen keyboard' : 'On-screen keyboard'}
               </button>
 
+              <label className="midi-row midi-check" data-tip="A 4-click count-in, then a bar-accented click. The grid locks to the count-in instead of your first note.">
+                <input type="checkbox" checked={metroOn} disabled={recording} onChange={(e) => setMetroOn(e.target.checked)} />
+                Metronome + 1-bar count-in
+              </label>
+              <label className="midi-row midi-check" data-tip="Overdub: the board's song plays while you record, and the take lands aligned to it.">
+                <input type="checkbox" checked={overdubOn} disabled={recording || !luting} onChange={(e) => setOverdubOn(e.target.checked)} />
+                Play the song while recording
+              </label>
+
               <button className={`btn ${recording ? 'midi-recording' : ''}`} onClick={toggleRecord}>
                 {recording ? <Square size={14} /> : <CircleDot size={14} />}
                 {recording ? `Stop — add to board (${noteCount} note${noteCount === 1 ? '' : 's'})` : 'Record a take'}
@@ -207,7 +255,9 @@ export function MidiPanel({ bpm, onRecorded }: Props) {
 
               <div className="midi-hint">
                 {recording
-                  ? 'The take starts on your first note. Notes quantize to the grid below.'
+                  ? metroOn
+                    ? 'Recording began after the count-in — notes land where you hear them.'
+                    : 'The take starts on your first note. Notes quantize to the grid below.'
                   : `Play to hear the ${instrumentByCode(instrument)?.name ?? 'voice'} live. Recording adds new voices to the board.`}
                 <br />
                 Grid: 1 unit = {unitMs}ms (#lute {bpm}).

@@ -4,8 +4,10 @@ import { PianoRoll } from './PianoRoll'
 import { VoiceStrip } from './VoiceStrip'
 import { parseLuting } from '../lib/luting'
 import type { ParseResult } from '../lib/luting'
-import { GripVertical, Piano, Volume2, VolumeX, Play, Square, X, ChevronUp, ChevronDown } from 'lucide-react'
-import { transposeBody, locateNoteAt } from '../lib/transform'
+import { GripVertical, Piano, Volume2, VolumeX, Play, Square, X, ChevronUp, ChevronDown, Waves, ListMusic, Music4 } from 'lucide-react'
+import { PROGRESSIONS, progressionById, progressionBody } from '../lib/chords'
+import { transposeBody, locateNoteAt, swingBody, arpeggiateBody } from '../lib/transform'
+import type { ArpPattern } from '../lib/transform'
 import EditorImport from 'react-simple-code-editor'
 // react-simple-code-editor ships only CJS; under Vite's rolldown interop the
 // default import can arrive as the module namespace ({ default }), so unwrap it.
@@ -44,6 +46,12 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax, songKey
   const [drop, setDrop] = useState<{ index: number; swapId: string | null } | null>(null)
   // id of the voice awaiting a remove confirmation, or null when the dialog is closed
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [swingOpen, setSwingOpen] = useState(false)
+  const [swingMsg, setSwingMsg] = useState<string | null>(null)
+  const [chordsOpen, setChordsOpen] = useState(false)
+  const [chordProg, setChordProg] = useState('pop')
+  const [chordPulse, setChordPulse] = useState<'held' | 'half' | 'beat'>('held')
+  const [chordRepeats, setChordRepeats] = useState(1)
   const confirmVoice = voices.find((v) => v.id === confirmId) ?? null
   const confirmBackdrop = useBackdropClose(() => setConfirmId(null))
 
@@ -102,6 +110,52 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax, songKey
     () => Math.max(64, Math.ceil(parsed.durationSec / (60 / parsed.bpm)) + 16),
     [parsed]
   )
+
+  // Generate a comping voice from a chord progression preset in the song key.
+  const addChordVoice = () => {
+    setChordsOpen(false)
+    const body = progressionBody(songKey, chordProg, {
+      pulse: chordPulse === 'held' ? null : chordPulse === 'half' ? 8 : 4,
+      repeats: chordRepeats,
+    })
+    const prog = progressionById(chordProg)
+    setVoices((vs) => [
+      ...vs,
+      { id: newVoiceId(), instrument: 'k', body, label: `Chords · ${prog.label.split(' · ')[0]}` },
+    ])
+  }
+
+  // Swing/straighten the whole song's eighth pairs (5/2+3/2 <-> 2+2).
+  const applySwing = (mode: 'swing' | 'straighten') => {
+    setSwingOpen(false)
+    const notices: string[] = []
+    let applied = 0
+    const next = voices.map((v, idx) => {
+      if (v.body.trim() === '') return v
+      if (/[@~]/.test(v.body)) {
+        notices.push(`"${v.label || 'voice'}" has tempo changes (@) or fades (~) — left alone.`)
+        return v
+      }
+      const body = swingBody(
+        parsed.notes.filter((n) => n.voice === idx),
+        parsed.bpm,
+        mode,
+        v.instrument === 'd'
+      )
+      if (body === null) return v
+      if (/[A-Z]/.test(v.body)) notices.push(`"${v.label || 'voice'}": macros were expanded to plain notes.`)
+      applied++
+      return { ...v, body }
+    })
+    if (applied > 0) setVoices(next)
+    const what = mode === 'swing' ? 'Swung' : 'Straightened'
+    setSwingMsg(
+      applied > 0
+        ? [`${what} the eighths in ${applied} voice${applied === 1 ? '' : 's'}.`, ...notices].join(' ')
+        : `No eighth pairs to ${mode} — notes must sit on the eighth grid (2 units at this BPM).`
+    )
+    setTimeout(() => setSwingMsg(null), 5000)
+  }
 
   const soloVoice = (idx: number, id: string, startAt?: number) => {
     playLuting(fullLuting, { id, soloVoice: idx, startAt })
@@ -179,6 +233,67 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax, songKey
           Voices <span className="panel-sub">each plays at the same time, separated by |</span>
         </div>
         <div className="board-controls">
+          <div className="export-wrap">
+            <button
+              className={`btn ${chordsOpen ? 'active-btn' : ''}`}
+              data-tip="Add a chord-progression comping voice in the song key"
+              onClick={() => setChordsOpen(!chordsOpen)}
+            >
+              <Music4 size={14} />
+              Chords
+            </button>
+            {chordsOpen && (
+              <div className="midi-pop chords-pop" role="dialog" aria-label="Chord progression">
+                <label className="midi-row">
+                  Progression
+                  <select value={chordProg} onChange={(e) => setChordProg(e.target.value)} aria-label="Progression">
+                    {PROGRESSIONS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="midi-row">
+                  Rhythm
+                  <select value={chordPulse} onChange={(e) => setChordPulse(e.target.value as 'held' | 'half' | 'beat')} aria-label="Chord rhythm">
+                    <option value="held">Held bars</option>
+                    <option value="half">Half-bar pulses</option>
+                    <option value="beat">Beat pulses</option>
+                  </select>
+                </label>
+                <label className="midi-row">
+                  Repeats
+                  <NumberInput value={chordRepeats} onChange={setChordRepeats} min={1} max={16} ariaLabel="Times through the progression" />
+                </label>
+                <button className="btn" onClick={addChordVoice}>
+                  <Music4 size={14} />
+                  Add as a voice ({KEYS.find((k) => k.id === songKey)?.label ?? songKey})
+                </button>
+                <div className="midi-hint">One bar per chord. The key comes from the Key selector (staff view shows it).</div>
+              </div>
+            )}
+          </div>
+          <div className="export-wrap">
+            <button
+              className={`btn ${swingOpen ? 'active-btn' : ''}`}
+              data-tip="Swing or straighten the whole song's eighth notes"
+              onClick={() => setSwingOpen(!swingOpen)}
+            >
+              <Waves size={14} />
+              Swing
+            </button>
+            {swingOpen && (
+              <div className="export-menu" role="menu">
+                <button className="btn" onClick={() => applySwing('swing')}>
+                  Swing eighths <span className="export-note">2+2 → 5/2+3/2</span>
+                </button>
+                <button className="btn" onClick={() => applySwing('straighten')}>
+                  Straighten <span className="export-note">5/2+3/2 → 2+2</span>
+                </button>
+              </div>
+            )}
+          </div>
           {staffView && (
             <label className="bpm-control" data-tip="Notation key — flattens the right notes for you in staff view (flat keys only for now). Shift-click overrides.">
               Key
@@ -197,6 +312,8 @@ export function VoiceBoard({ voices, setVoices, bpm, setBpm, showSyntax, songKey
           </label>
         </div>
       </div>
+
+      {swingMsg && <div className="roll-note warning">{swingMsg}</div>}
 
       <div
         className={`voice-list ${drop ? 'drag-over' : ''}`}
@@ -273,10 +390,15 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey,
   const [editing, setEditing] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
   const [caret, setCaret] = useState<number | null>(null)
+  const [arpOpen, setArpOpen] = useState(false)
   const ins = instrumentByCode(voice.instrument)
   const playing = useActivePlayback() === voice.id
   const voiceNotes = useMemo(
     () => parsed.notes.filter((n) => n.voice === voiceIndex),
+    [parsed, voiceIndex]
+  )
+  const ghostNotes = useMemo(
+    () => parsed.notes.filter((n) => n.voice !== voiceIndex),
     [parsed, voiceIndex]
   )
 
@@ -315,6 +437,25 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey,
     onChange({ body })
   }
 
+  const arpeggiate = (pattern: ArpPattern) => {
+    setArpOpen(false)
+    if (voice.instrument === 'd') {
+      warn("Drum voices don't arpeggiate — try the pattern presets instead.")
+      return
+    }
+    if (/[@~]/.test(voice.body)) {
+      warn("Can't arpeggiate voices with tempo changes (@) or fades (~) yet — edit the text directly.")
+      return
+    }
+    const body = arpeggiateBody(voiceNotes, parsed.bpm, pattern)
+    if (body === null) {
+      warn('No chords to arpeggiate in this voice (chords need at least 2 units of length).')
+      return
+    }
+    if (/[A-Z]/.test(voice.body)) warn('Macros were expanded to plain notes by the arpeggiator.')
+    onChange({ body })
+  }
+
   return (
     <div className={`voice-card ${swapHighlight ? 'drag-over' : ''} ${voice.muted ? 'muted' : ''}`}>
       <div className="voice-head">
@@ -349,6 +490,30 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey,
         />
         {editing && (
           <>
+            <div className="export-wrap">
+              <button
+                className={`icon-btn ${arpOpen ? 'active' : ''}`}
+                aria-label="Arpeggiate chords"
+                data-tip="Arpeggiate: explode this voice's chords into a pattern"
+                data-tip-pos="right"
+                onClick={() => setArpOpen(!arpOpen)}
+              >
+                <ListMusic size={14} />
+              </button>
+              {arpOpen && (
+                <div className="export-menu" role="menu">
+                  <button className="btn" onClick={() => arpeggiate('up')}>
+                    Arpeggiate up <span className="export-note">c e g · c e g</span>
+                  </button>
+                  <button className="btn" onClick={() => arpeggiate('down')}>
+                    Arpeggiate down <span className="export-note">g e c · g e c</span>
+                  </button>
+                  <button className="btn" onClick={() => arpeggiate('updown')}>
+                    Up &amp; down <span className="export-note">c e g e · c e g e</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               className="icon-btn"
               aria-label="Transpose up"
@@ -428,6 +593,7 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey,
       {editing && (
         <PianoRoll
           notes={voiceNotes}
+          ghostNotes={ghostNotes}
           bpm={parsed.bpm}
           instrument={voice.instrument}
           body={voice.body}

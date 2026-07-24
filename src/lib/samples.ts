@@ -223,7 +223,7 @@ const DECAY_TAU = 3000 / 44100 // ≈68ms, LuteBoi's exp(-n/3000) at 44.1kHz
  * Schedule a note from real samples. Returns false if no sample is available
  * (so the caller can fall back to the synth).
  */
-export function scheduleSampled(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number): boolean {
+export function scheduleSampled(ctx: BaseAudioContext, dest: AudioNode, n: ScheduledNote, t0: number): boolean {
   const bank = banks.get(n.instrument)
   if (!bank) return false
   const start = t0 + n.timeSec

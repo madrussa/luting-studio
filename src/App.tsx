@@ -489,7 +489,7 @@ export default function App() {
             {justSaved ? <Check size={15} /> : <LibraryIcon size={15} />}
             {justSaved ? 'Saved' : 'Library'}
           </button>
-          <MidiPanel bpm={bpm} onRecorded={handleMidiRecorded} />
+          <MidiPanel bpm={bpm} luting={luting} onRecorded={handleMidiRecorded} />
           <button className="btn primary" data-tip-pos="right" onClick={() => setImportOpen(true)}>
             <Import size={15} />
             Import / Convert
@@ -563,7 +563,7 @@ export default function App() {
         <VoiceBoard voices={voices} setVoices={setVoices} bpm={bpm} setBpm={setBpm} showSyntax={showSyntax} songKey={songKey} setSongKey={setSongKey} />
       </div>
 
-      <OutputPanel luting={luting} lanes={lanes} onLoadLuting={handleLoadLuting} onTrim={handleTrim} />
+      <OutputPanel luting={luting} lanes={lanes} songName={songName} onLoadLuting={handleLoadLuting} onTrim={handleTrim} />
     </div>
   )
 }

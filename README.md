@@ -29,6 +29,19 @@ notation used by [luteboi.com](https://luteboi.com/)
   autocorrelation pitch detection. Works on clean single-line audio
   (whistling, humming, one instrument); full mixes won't transcribe. Set the
   song BPM before converting.
+- **Recording extras** — an optional metronome with a 1-bar count-in (the
+  grid locks to the click instead of your first note), and **overdub**: the
+  board's song plays while you record, and the take lands aligned to it.
+- **Export** — download the song as **WAV** (lossless), **MP3**, or
+  **MIDI** (one track per voice, GM instruments, drums on channel 10).
+  Audio renders offline with the same engine as the preview.
+- **Composing tools** — a **chord progression** generator (pop, 50s, jazz,
+  canon, 12-bar blues… as triads in the song key), a whole-song
+  **swing/straighten** transform (`2+2 ⇄ 5/2+3/2` eighth pairs), a per-voice
+  **arpeggiator** (up / down / up-down), and **drum pattern** presets
+  (rock, house, shuffle, funk, waltz, fill) in the Drumkit editor.
+- **Ghost notes** — the piano roll can show the other voices as grey
+  silhouettes behind the one you're editing.
 - **Luting import** — paste an existing luting into the import box and it is
   split into voices on the board: the `#lute` BPM is picked up, each voice's
   `i<code>` marker becomes its instrument selector, and comments/whitespace

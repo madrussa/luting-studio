@@ -65,9 +65,21 @@ function StudioHelp() {
       </div>
 
       <div className="help-section">
+        <div className="help-title">Composing tools</div>
+        <ul className="help-list">
+          <li><strong>Chords</strong> (board header) adds a comping voice from a preset progression (pop, 50s, jazz, folk, canon, 12-bar blues) as triads in the song key — held bars or pulsed.</li>
+          <li><strong>Swing</strong> (board header) swings or straightens the whole song's eighth pairs (<code>2+2 ⇄ 5/2+3/2</code>). Notes off the eighth grid are untouched; drum hats just play late.</li>
+          <li><strong>Arpeggiate</strong> (voice editor toolbar) explodes a voice's chords into up / down / up-down patterns of unit notes.</li>
+          <li><strong>Drum Patterns</strong> (Drumkit editor toolbar) appends classic one-bar beats — rock, house, shuffle, funk, waltz, fill — at the next bar; click repeatedly to lay down bars.</li>
+          <li><strong>Ghost notes</strong> (the 👻 toggle in the editor toolbar) draws the other voices as grey silhouettes behind the one you're editing, so harmonies line up by eye.</li>
+        </ul>
+      </div>
+
+      <div className="help-section">
         <div className="help-title">Import, optimize, score, share</div>
         <ul className="help-list">
           <li><strong>Import / Convert</strong>: drop a MIDI (accurate, multi-voice, drum mapping) or an MP3 (best-effort, clean single melodies only), or paste any luting — including <strong>multilutes</strong>, which are joined automatically. "Unoptimize on import" expands macros so it's immediately editable.</li>
+          <li><strong>Export</strong> downloads the song as <strong>WAV</strong> (lossless), <strong>MP3</strong> (shareable), or <strong>MIDI</strong> (notes, for DAWs). Audio renders with the same engine as the preview — Quality mode exports use the real samples.</li>
           <li><strong>Optimize</strong> compresses with macros (often 50–70% smaller) and self-checks that the music is identical. If it's still over the 493-char cheer limit, it offers numbered <strong>multilute messages</strong> to send in order. <strong>Unoptimize</strong> expands macros back to plain notes.</li>
           <li><strong>Score</strong> opens an engraved, read-only view of the whole piece (staves, beams, ties, percussion staff for drums).</li>
           <li><strong>Trim</strong> removes seconds from the start and/or end — click the timeline to pick the cuts, or type them.</li>
@@ -83,6 +95,8 @@ function StudioHelp() {
           <li><strong>Record a take</strong> captures what you play and adds it to the board as new voice(s). The take starts on your <strong>first note</strong> — no count-in — and notes are quantized to the luting grid (one <code>t1</code> unit = 60/BPM seconds), with simultaneous equal-length notes becoming chords and other overlaps split into extra voices, like the MIDI file converter.</li>
           <li>With the <strong>Drumkit</strong> voice selected, pads sending General MIDI drum notes land on the matching luteboi drum (kick, snare, hats…).</li>
           <li>Key velocity is kept: it sets how loud live notes play and becomes the recorded voice's <code>v</code> volume.</li>
+          <li><strong>Metronome + count-in</strong>: a 4-click count-in, then a bar-accented click — the grid locks to the count-in instead of your first note, so long takes stay tight.</li>
+          <li><strong>Overdub</strong> ("play the song while recording") plays the board while you record, and the take lands aligned to the song — layer a bass line under your melody by ear.</li>
           <li>In <strong>Quality</strong> mode, live notes play the real LuteBoi samples — sustained voices loop while the key is held. The built-in synth fills in while a pack is still downloading (and always covers Lute, Bass, Chiptune and Percussion, which LuteBoi synthesizes too).</li>
         </ul>
       </div>

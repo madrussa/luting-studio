@@ -11,9 +11,12 @@ export interface RollView {
   scrollUnits: number
   /** grid = piano roll rows; staff = grand-staff notation */
   mode: RollMode
+  /** show the other voices' notes as grey silhouettes */
+  ghosts: boolean
 }
 
 const MODE_KEY = 'luting-roll-mode'
+const GHOSTS_KEY = 'luting-roll-ghosts'
 
 const savedMode = ((): RollMode => {
   try {
@@ -23,19 +26,26 @@ const savedMode = ((): RollMode => {
   }
 })()
 
-let view: RollView = { pxPerUnit: 10, scrollUnits: 0, mode: savedMode }
+const savedGhosts = ((): boolean => {
+  try {
+    return localStorage.getItem(GHOSTS_KEY) !== 'off'
+  } catch {
+    return true
+  }
+})()
+
+let view: RollView = { pxPerUnit: 10, scrollUnits: 0, mode: savedMode, ghosts: savedGhosts }
 const subs = new Set<() => void>()
 
 export const getRollView = (): RollView => view
 
 export function setRollView(patch: Partial<RollView>) {
   view = { ...view, ...patch }
-  if (patch.mode) {
-    try {
-      localStorage.setItem(MODE_KEY, patch.mode)
-    } catch {
-      // preference just won't persist
-    }
+  try {
+    if (patch.mode) localStorage.setItem(MODE_KEY, patch.mode)
+    if (patch.ghosts !== undefined) localStorage.setItem(GHOSTS_KEY, patch.ghosts ? 'on' : 'off')
+  } catch {
+    // preference just won't persist
   }
   for (const cb of [...subs]) cb()
 }

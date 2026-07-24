@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@tonejs/midi": "^2.0.28",
     "lucide-react": "^1.18.0",
     "prismjs": "^1.30.0",
