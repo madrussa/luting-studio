@@ -1044,7 +1044,7 @@ export function PianoRoll({
               Patterns
             </button>
             {patternsOpen && (
-              <div className="export-menu" role="menu">
+              <div className="export-menu align-left" role="menu">
                 {DRUM_PATTERNS.map((p) => (
                   <button key={p.id} className="btn" onClick={() => addPattern(p)}>
                     {p.label}

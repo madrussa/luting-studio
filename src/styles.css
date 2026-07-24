@@ -1825,3 +1825,10 @@ select {
 .chords-pop {
   width: 300px;
 }
+
+/* menus whose button sits near a clipping container's left edge open
+   left-aligned so they stay inside the scroll area */
+.export-menu.align-left {
+  left: 0;
+  right: auto;
+}
