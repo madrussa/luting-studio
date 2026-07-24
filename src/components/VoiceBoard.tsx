@@ -4,8 +4,9 @@ import { PianoRoll } from './PianoRoll'
 import { VoiceStrip } from './VoiceStrip'
 import { parseLuting } from '../lib/luting'
 import type { ParseResult } from '../lib/luting'
-import { GripVertical, Piano, Volume2, VolumeX, Play, Square, X, ChevronUp, ChevronDown, Waves } from 'lucide-react'
-import { transposeBody, locateNoteAt, swingBody } from '../lib/transform'
+import { GripVertical, Piano, Volume2, VolumeX, Play, Square, X, ChevronUp, ChevronDown, Waves, ListMusic } from 'lucide-react'
+import { transposeBody, locateNoteAt, swingBody, arpeggiateBody } from '../lib/transform'
+import type { ArpPattern } from '../lib/transform'
 import EditorImport from 'react-simple-code-editor'
 // react-simple-code-editor ships only CJS; under Vite's rolldown interop the
 // default import can arrive as the module namespace ({ default }), so unwrap it.
@@ -329,6 +330,7 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey,
   const [editing, setEditing] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
   const [caret, setCaret] = useState<number | null>(null)
+  const [arpOpen, setArpOpen] = useState(false)
   const ins = instrumentByCode(voice.instrument)
   const playing = useActivePlayback() === voice.id
   const voiceNotes = useMemo(
@@ -375,6 +377,25 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey,
     onChange({ body })
   }
 
+  const arpeggiate = (pattern: ArpPattern) => {
+    setArpOpen(false)
+    if (voice.instrument === 'd') {
+      warn("Drum voices don't arpeggiate — try the pattern presets instead.")
+      return
+    }
+    if (/[@~]/.test(voice.body)) {
+      warn("Can't arpeggiate voices with tempo changes (@) or fades (~) yet — edit the text directly.")
+      return
+    }
+    const body = arpeggiateBody(voiceNotes, parsed.bpm, pattern)
+    if (body === null) {
+      warn('No chords to arpeggiate in this voice (chords need at least 2 units of length).')
+      return
+    }
+    if (/[A-Z]/.test(voice.body)) warn('Macros were expanded to plain notes by the arpeggiator.')
+    onChange({ body })
+  }
+
   return (
     <div className={`voice-card ${swapHighlight ? 'drag-over' : ''} ${voice.muted ? 'muted' : ''}`}>
       <div className="voice-head">
@@ -409,6 +430,30 @@ function VoiceCard({ voice, voiceIndex, parsed, totalUnits, showSyntax, songKey,
         />
         {editing && (
           <>
+            <div className="export-wrap">
+              <button
+                className={`icon-btn ${arpOpen ? 'active' : ''}`}
+                aria-label="Arpeggiate chords"
+                data-tip="Arpeggiate: explode this voice's chords into a pattern"
+                data-tip-pos="right"
+                onClick={() => setArpOpen(!arpOpen)}
+              >
+                <ListMusic size={14} />
+              </button>
+              {arpOpen && (
+                <div className="export-menu" role="menu">
+                  <button className="btn" onClick={() => arpeggiate('up')}>
+                    Arpeggiate up <span className="export-note">c e g · c e g</span>
+                  </button>
+                  <button className="btn" onClick={() => arpeggiate('down')}>
+                    Arpeggiate down <span className="export-note">g e c · g e c</span>
+                  </button>
+                  <button className="btn" onClick={() => arpeggiate('updown')}>
+                    Up &amp; down <span className="export-note">c e g e · c e g e</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               className="icon-btn"
               aria-label="Transpose up"

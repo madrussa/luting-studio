@@ -198,6 +198,59 @@ export function swingBody(
   return serializeVoiceBody(events, { volume: dominantVolume(parsedNotes) })
 }
 
+export type ArpPattern = 'up' | 'down' | 'updown'
+
+/**
+ * Explode every chord in a voice into an arpeggio pattern of `step`-unit
+ * notes cycling through the chord's pitches for the chord's duration (the
+ * last note absorbs any remainder). Single notes and rests pass through.
+ * Returns null when there's nothing to arpeggiate.
+ */
+export function arpeggiateBody(
+  parsedNotes: ScheduledNote[],
+  bpm: number,
+  pattern: ArpPattern,
+  step = 1
+): string | null {
+  if (parsedNotes.length === 0) return null
+  const roll = scheduledToRollNotes(parsedNotes, bpm)
+
+  const groups = new Map<string, RollNote[]>()
+  for (const n of roll) {
+    const key = `${n.start}:${n.dur}`
+    const g = groups.get(key)
+    if (g) g.push(n)
+    else groups.set(key, [n])
+  }
+
+  let changed = false
+  const out: RollNote[] = []
+  for (const g of groups.values()) {
+    if (g.length < 2 || g[0].dur <= step || g.some((n) => n.midi === undefined)) {
+      out.push(...g)
+      continue
+    }
+    changed = true
+    const pitches = g.map((n) => n.midi!).sort((a, b) => a - b)
+    let order: number[]
+    if (pattern === 'up') order = pitches
+    else if (pattern === 'down') order = [...pitches].reverse()
+    else {
+      // up-down: peak and trough played once per cycle (c e g e | c e g e …)
+      order = [...pitches, ...pitches.slice(1, -1).reverse()]
+    }
+    const { start, dur } = g[0]
+    let k = 0
+    for (let p = 0; p < dur; p += step) {
+      out.push({ start: start + p, dur: Math.min(step, dur - p), midi: order[k % order.length] })
+      k++
+    }
+  }
+  if (!changed) return null
+
+  return serializeVoiceBody(notesToEvents(out, false), { volume: dominantVolume(parsedNotes) })
+}
+
 /**
  * Shift every pitch in a voice by N semitones and re-serialize its body.
  * Returns null if any note would leave the playable o1–o7 range.
