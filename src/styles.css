@@ -1813,3 +1813,11 @@ select {
   font-size: 11px;
   color: var(--text-dim);
 }
+
+.midi-row.midi-check {
+  justify-content: flex-start;
+  cursor: pointer;
+}
+.midi-row.midi-check input {
+  accent-color: var(--accent);
+}

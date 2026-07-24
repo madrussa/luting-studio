@@ -489,7 +489,7 @@ export default function App() {
             {justSaved ? <Check size={15} /> : <LibraryIcon size={15} />}
             {justSaved ? 'Saved' : 'Library'}
           </button>
-          <MidiPanel bpm={bpm} onRecorded={handleMidiRecorded} />
+          <MidiPanel bpm={bpm} luting={luting} onRecorded={handleMidiRecorded} />
           <button className="btn primary" data-tip-pos="right" onClick={() => setImportOpen(true)}>
             <Import size={15} />
             Import / Convert

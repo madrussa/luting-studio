@@ -41,11 +41,21 @@ export interface MidiRecorder {
   finish: (timeMs: number) => RecordResult
 }
 
-export function createMidiRecorder(lutingBpm: number, instrument: string): MidiRecorder {
+export interface RecorderOptions {
+  /**
+   * Explicit grid zero on the MIDI timestamp clock (performance.now()).
+   * Set by the metronome count-in and by overdub (playback start); without
+   * it the grid anchors on the first note-on. Notes released before the
+   * anchor (count-in noodling) are dropped; notes held across it start at 0.
+   */
+  anchorMs?: number
+}
+
+export function createMidiRecorder(lutingBpm: number, instrument: string, opts: RecorderOptions = {}): MidiRecorder {
   const unitMs = 60000 / Math.max(1, lutingBpm)
   const open = new Map<number, { onMs: number; velocity: number }>()
   const done: TakenNote[] = []
-  let anchor: number | null = null
+  let anchor: number | null = opts.anchorMs ?? null
 
   const close = (midi: number, timeMs: number) => {
     const o = open.get(midi)
@@ -76,7 +86,9 @@ export function createMidiRecorder(lutingBpm: number, instrument: string): MidiR
       const quantized: { start: number; dur: number; pitch: Pitch; velocity: number }[] = []
       const unmapped = new Set<number>()
       for (const n of done) {
-        const start = Math.max(0, Math.round((n.onMs - anchor) / unitMs))
+        if (n.offMs <= anchor) continue // released during the count-in
+        const onMs = Math.max(n.onMs, anchor) // held across the anchor -> starts at 0
+        const start = Math.max(0, Math.round((onMs - anchor) / unitMs))
         if (isDrum) {
           // GM drum note if the pad sends one, else the luteboi drum-map pitch
           const pitch = GM_DRUM[n.midi] ?? midiToPitch(n.midi)
@@ -86,7 +98,7 @@ export function createMidiRecorder(lutingBpm: number, instrument: string): MidiR
           }
           quantized.push({ start, dur: 1, pitch, velocity: n.velocity })
         } else {
-          const dur = Math.max(1, Math.round((n.offMs - n.onMs) / unitMs))
+          const dur = Math.max(1, Math.round((n.offMs - onMs) / unitMs))
           quantized.push({ start, dur, pitch: midiToPitch(clampMidi(n.midi)), velocity: n.velocity })
         }
       }

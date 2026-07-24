@@ -240,3 +240,64 @@ export function stopAllLive() {
   for (const note of held.values()) note.release(at)
   held.clear()
 }
+
+// ---- metronome --------------------------------------------------------------
+// Clicks on song beats (4 luting units each, since #lute BPM is 4x the song's).
+// Used by MIDI recording: an optional count-in bar, then a bar-accented click,
+// with the returned anchor giving recording's grid zero on the MIDI timestamp
+// clock (performance.now()).
+
+let metro: { timer: number } | null = null
+
+export interface MetronomeHandle {
+  /** performance.now()-clock time of beat zero (right after the count-in) */
+  anchorMs: number
+  stop: () => void
+}
+
+function tick(c: AudioContext, dest: AudioNode, t: number, accent: boolean) {
+  const osc = c.createOscillator()
+  osc.type = 'square'
+  osc.frequency.value = accent ? 1568 : 1046 // G6 / C6
+  const g = c.createGain()
+  g.gain.setValueAtTime(accent ? 0.22 : 0.13, t)
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.04)
+  osc.connect(g)
+  g.connect(dest)
+  osc.start(t)
+  osc.stop(t + 0.05)
+}
+
+export function startMetronome(lutingBpm: number, countInBeats = 4): MetronomeHandle {
+  const c = ensureLiveAudio()
+  stopMetronome()
+  const beat = 240 / Math.max(1, lutingBpm) // one song beat in seconds
+  const start = c.currentTime + 0.1
+  const anchorCtx = start + countInBeats * beat
+
+  let n = 0
+  const scheduleAhead = () => {
+    if (!master) return
+    const until = c.currentTime + 0.6
+    while (start + n * beat < until) {
+      const t = start + n * beat
+      // count-in clicks are all high; after it, accent each bar's downbeat
+      const accent = n < countInBeats || (n - countInBeats) % 4 === 0
+      tick(c, master, t, accent)
+      n++
+    }
+  }
+  scheduleAhead()
+  metro = { timer: window.setInterval(scheduleAhead, 250) }
+  return {
+    anchorMs: performance.now() + (anchorCtx - c.currentTime) * 1000,
+    stop: stopMetronome,
+  }
+}
+
+export function stopMetronome() {
+  if (metro) {
+    window.clearInterval(metro.timer)
+    metro = null
+  }
+}
