@@ -108,6 +108,7 @@ export function PianoRoll({
 
   const [noteLen, setNoteLen] = useState(4)
   const [patternsOpen, setPatternsOpen] = useState(false)
+  const [patternBars, setPatternBars] = useState(1)
   const [flash, setFlash] = useState<{ text: string; warn: boolean } | null>(null)
   const flashTimer = useRef(0)
   const [viewW, setViewW] = useState(600)
@@ -641,13 +642,15 @@ export function PianoRoll({
   const warn = (msg: string) => showFlash(msg, true)
   const info = (msg: string) => showFlash(msg, false)
 
-  // append a preset drum-machine bar at the next bar boundary
+  // append preset drum-machine bars at the next bar boundary
   const addPattern = (p: DrumPattern) => {
     setPatternsOpen(false)
     const end = derived.notes.reduce((m, n) => Math.max(m, n.start + n.dur), 0)
     const at = Math.ceil(end / p.barUnits) * p.barUnits
-    commit([...derived.notes, ...patternRollNotes(p, at)])
-    info(`Added a ${p.label} bar at bar ${Math.floor(at / p.barUnits) + 1} — click again for another.`)
+    commit([...derived.notes, ...patternRollNotes(p, at, patternBars)])
+    info(
+      `Added ${patternBars} ${p.label} bar${patternBars === 1 ? '' : 's'} at bar ${Math.floor(at / p.barUnits) + 1} — click again for more.`
+    )
   }
 
   // the note under a grid position, if any
@@ -1045,10 +1048,14 @@ export function PianoRoll({
             </button>
             {patternsOpen && (
               <div className="export-menu align-left" role="menu">
+                <label className="midi-row" data-tip="How many bars of the pattern to lay down per click">
+                  Bars
+                  <NumberInput value={patternBars} onChange={setPatternBars} min={1} max={32} ariaLabel="Bars of the pattern to add" />
+                </label>
                 {DRUM_PATTERNS.map((p) => (
                   <button key={p.id} className="btn" onClick={() => addPattern(p)}>
                     {p.label}
-                    <span className="export-note">{p.barUnits === 12 ? '3/4 bar' : '1 bar'}</span>
+                    <span className="export-note">{p.barUnits === 12 ? '3/4' : '4/4'} × {patternBars}</span>
                   </button>
                 ))}
               </div>

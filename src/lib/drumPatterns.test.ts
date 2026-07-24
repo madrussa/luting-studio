@@ -35,4 +35,20 @@ describe('drum patterns', () => {
     const notes = patternRollNotes(rock, 32)
     expect(Math.min(...notes.map((n) => n.start))).toBe(32)
   })
+
+  it('repeats for the requested number of bars', () => {
+    const rock = DRUM_PATTERNS[0]
+    const one = patternRollNotes(rock, 0, 1)
+    const four = patternRollNotes(rock, 16, 4)
+    expect(four).toHaveLength(one.length * 4)
+    // each bar is an exact translation of the first
+    for (let bar = 0; bar < 4; bar++) {
+      const hits = four.filter((n) => n.start >= 16 + bar * 16 && n.start < 32 + bar * 16)
+      expect(hits.map((n) => `${n.start - 16 - bar * 16}:${n.drum}`)).toEqual(one.map((n) => `${n.start}:${n.drum}`))
+    }
+    // waltz repeats on its own 12-unit bar
+    const waltz = DRUM_PATTERNS.find((p) => p.id === 'waltz')!
+    const w2 = patternRollNotes(waltz, 0, 2)
+    expect(Math.max(...w2.map((n) => n.start))).toBe(12 + 8)
+  })
 })

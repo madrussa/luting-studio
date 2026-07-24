@@ -77,11 +77,14 @@ export const DRUM_PATTERNS: DrumPattern[] = [
   },
 ]
 
-/** The pattern's one-shot hits (1-unit notes) placed at `startUnit`. */
-export function patternRollNotes(p: DrumPattern, startUnit: number): RollNote[] {
+/** The pattern's one-shot hits (1-unit notes) placed at `startUnit`, repeated for `bars` bars. */
+export function patternRollNotes(p: DrumPattern, startUnit: number, bars = 1): RollNote[] {
   const out: RollNote[] = []
-  for (const h of p.hits) {
-    for (const s of h.steps) out.push({ start: startUnit + s, dur: 1, drum: h.drum })
+  for (let bar = 0; bar < Math.max(1, bars); bar++) {
+    const at = startUnit + bar * p.barUnits
+    for (const h of p.hits) {
+      for (const s of h.steps) out.push({ start: at + s, dur: 1, drum: h.drum })
+    }
   }
   return out.sort((a, b) => a.start - b.start)
 }
