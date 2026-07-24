@@ -23,17 +23,21 @@ import {
   UnfoldHorizontal,
   Scissors,
   FileMusic,
+  Download,
 } from 'lucide-react'
+import { renderLuting, audioBufferToWav, audioBufferToMp3, downloadBlob } from '../lib/render'
+import { exportMidi } from '../lib/midiExport'
 import lutingMascot from '../assets/luting.webp'
 
 interface Props {
   luting: string
   lanes: Lane[]
+  songName?: string
   onLoadLuting: (text: string) => void
   onTrim: (startSec: number, endSec: number) => void
 }
 
-export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
+export function OutputPanel({ luting, lanes, songName, onLoadLuting, onTrim }: Props) {
   const [copied, setCopied] = useState(false)
   const [opt, setOpt] = useState<(OptimizeResult & { mode: 'optimize' | 'expand' }) | null>(null)
   const [optimizing, setOptimizing] = useState(false)
@@ -41,6 +45,8 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
   const [copiedPart, setCopiedPart] = useState<number | null>(null)
   const [trimSel, setTrimSel] = useState<{ start: number | null; end: number | null } | null>(null)
   const [scoreOpen, setScoreOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exporting, setExporting] = useState<'wav' | 'mp3' | null>(null)
   const activeId = useActivePlayback()
   const playing = activeId === 'main'
   const optPlaying = activeId === 'optimized'
@@ -122,6 +128,25 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
     setTimeout(() => setCopied(false), 1500)
   }
 
+  const filename = (ext: string) => `${(songName || 'luting').trim().replace(/[/\\:*?"<>|]/g, '_')}.${ext}`
+
+  const doExport = async (kind: 'wav' | 'mp3' | 'mid') => {
+    setExportOpen(false)
+    if (kind === 'mid') {
+      const bytes = exportMidi(luting, lanes.map((l) => l.label))
+      // pass an ArrayBuffer-backed copy so the Blob types check out
+      downloadBlob(new Blob([new Uint8Array(bytes)], { type: 'audio/midi' }), filename('mid'))
+      return
+    }
+    setExporting(kind)
+    try {
+      const buf = await renderLuting(luting)
+      downloadBlob(kind === 'wav' ? audioBufferToWav(buf) : audioBufferToMp3(buf), filename(kind))
+    } finally {
+      setExporting(null)
+    }
+  }
+
   return (
     <section className="output">
       <div className="output-header">
@@ -171,6 +196,30 @@ export function OutputPanel({ luting, lanes, onLoadLuting, onTrim }: Props) {
             <FileMusic size={14} />
             Score
           </button>
+          <div className="export-wrap">
+            <button
+              className={`btn ${exportOpen ? 'active-btn' : ''}`}
+              data-tip="Download the song as an audio or MIDI file"
+              onClick={() => setExportOpen(!exportOpen)}
+              disabled={!luting || exporting !== null}
+            >
+              {exporting ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+              {exporting ? `Rendering ${exporting.toUpperCase()}…` : 'Export'}
+            </button>
+            {exportOpen && (
+              <div className="export-menu" role="menu">
+                <button className="btn" onClick={() => void doExport('wav')}>
+                  WAV <span className="export-note">lossless audio</span>
+                </button>
+                <button className="btn" onClick={() => void doExport('mp3')}>
+                  MP3 <span className="export-note">shareable audio</span>
+                </button>
+                <button className="btn" onClick={() => void doExport('mid')}>
+                  MIDI <span className="export-note">notes, for DAWs</span>
+                </button>
+              </div>
+            )}
+          </div>
           <button
             className={`btn ${trimSel ? 'active-btn' : ''}`}
             data-tip="Trim the song: click the timeline where it should start, then where it should end"

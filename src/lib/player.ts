@@ -113,7 +113,7 @@ export interface MelodicGraph {
 }
 
 export function buildMelodicGraph(
-  ctx: AudioContext,
+  ctx: BaseAudioContext,
   dest: AudioNode,
   cfg: SynthConfig,
   freq: number,
@@ -211,7 +211,7 @@ export function buildMelodicGraph(
   }
 }
 
-function scheduleMelodic(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
+function scheduleMelodic(ctx: BaseAudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
   const cfg = SYNTHS[n.instrument] ?? SYNTHS.l
   const freq = 440 * Math.pow(2, ((n.midi ?? 60) - 69) / 12 + (cfg.octaveShift ?? 0))
   const start = t0 + n.timeSec
@@ -297,7 +297,7 @@ export function karplusBuffer(ctx: BaseAudioContext, freq: number, durSec: numbe
   return buf
 }
 
-function scheduleKarplus(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
+function scheduleKarplus(ctx: BaseAudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
   const cfg = SYNTHS.l
   const freq = 440 * Math.pow(2, ((n.midi ?? 60) - 69) / 12 + (cfg.octaveShift ?? 0))
   const start = t0 + n.timeSec
@@ -320,7 +320,7 @@ function scheduleKarplus(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t
 // (exp(-x/1000) ≈ 23ms time constant), gone by ~70ms. Pitch only set the burst
 // length there, so we ignore it. A pitched triangle (the old SYNTHS.p) was the
 // wrong primitive — no config could turn a harmonic tone into broadband noise.
-export function scheduleNoisePerc(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
+export function scheduleNoisePerc(ctx: BaseAudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
   const start = t0 + n.timeSec
   const src = ctx.createBufferSource()
   src.buffer = getNoise(ctx)
@@ -343,7 +343,7 @@ export function scheduleNoisePerc(ctx: AudioContext, dest: AudioNode, n: Schedul
 }
 
 function noiseBurst(
-  ctx: AudioContext,
+  ctx: BaseAudioContext,
   dest: AudioNode,
   start: number,
   dur: number,
@@ -370,7 +370,7 @@ function noiseBurst(
 }
 
 function pitchedHit(
-  ctx: AudioContext,
+  ctx: BaseAudioContext,
   dest: AudioNode,
   start: number,
   dur: number,
@@ -392,7 +392,7 @@ function pitchedHit(
   osc.stop(start + dur + 0.02)
 }
 
-export function scheduleDrum(ctx: AudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
+export function scheduleDrum(ctx: BaseAudioContext, dest: AudioNode, n: ScheduledNote, t0: number) {
   const sound = DRUM_SOUNDS[n.drum ?? '']
   if (!sound) return
   const start = t0 + n.timeSec
@@ -454,6 +454,26 @@ export function scheduleDrum(ctx: AudioContext, dest: AudioNode, n: ScheduledNot
       pitchedHit(ctx, dest, start, 1.2, v * 0.6, 1860, 1850)
       break
   }
+}
+
+/**
+ * Schedule one note into any context — the live preview or an offline
+ * render: pan wrapper, sampled voice in Quality mode when its pack is
+ * loaded, otherwise the matching synth path.
+ */
+export function scheduleNote(ctx: BaseAudioContext, master: AudioNode, n: ScheduledNote, t0: number) {
+  let dest: AudioNode = master
+  if (n.pan !== 0) {
+    const pan = ctx.createStereoPanner()
+    pan.pan.value = n.pan
+    pan.connect(master)
+    dest = pan
+  }
+  if (getPlaybackMode() === 'quality' && getBank(n.instrument) && scheduleSampled(ctx, dest, n, t0)) return
+  if (n.drum) scheduleDrum(ctx, dest, n, t0)
+  else if (n.instrument === 'l') scheduleKarplus(ctx, dest, n, t0)
+  else if (n.instrument === 'p') scheduleNoisePerc(ctx, dest, n, t0)
+  else scheduleMelodic(ctx, dest, n, t0)
 }
 
 export interface PlayHandle {
@@ -591,21 +611,7 @@ export function playLuting(text: string, opts: PlayOptions = {}): PlayHandle {
   const scheduleWindow = () => {
     const limit = ctx.currentTime - t0 + AHEAD_SEC
     while (idx < queue.length && queue[idx].timeSec <= limit) {
-      const n = queue[idx++]
-      let dest: AudioNode = master
-      if (n.pan !== 0) {
-        const pan = ctx.createStereoPanner()
-        pan.pan.value = n.pan
-        pan.connect(master)
-        dest = pan
-      }
-      const sampled =
-        getPlaybackMode() === 'quality' && getBank(n.instrument) && scheduleSampled(ctx, dest, n, t0)
-      if (sampled) continue
-      if (n.drum) scheduleDrum(ctx, dest, n, t0)
-      else if (n.instrument === 'l') scheduleKarplus(ctx, dest, n, t0)
-      else if (n.instrument === 'p') scheduleNoisePerc(ctx, dest, n, t0)
-      else scheduleMelodic(ctx, dest, n, t0)
+      scheduleNote(ctx, master, queue[idx++], t0)
     }
   }
   scheduleWindow()

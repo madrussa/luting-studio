@@ -563,7 +563,7 @@ export default function App() {
         <VoiceBoard voices={voices} setVoices={setVoices} bpm={bpm} setBpm={setBpm} showSyntax={showSyntax} songKey={songKey} setSongKey={setSongKey} />
       </div>
 
-      <OutputPanel luting={luting} lanes={lanes} onLoadLuting={handleLoadLuting} onTrim={handleTrim} />
+      <OutputPanel luting={luting} lanes={lanes} songName={songName} onLoadLuting={handleLoadLuting} onTrim={handleTrim} />
     </div>
   )
 }
