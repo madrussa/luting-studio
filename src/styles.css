@@ -1589,3 +1589,198 @@ select {
   border: none;
   padding: 0;
 }
+
+/* ---- MIDI keyboard panel ------------------------------------------------ */
+
+.midi-wrap {
+  position: relative;
+}
+.midi-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.midi-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.midi-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.midi-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 6px;
+}
+.midi-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.midi-error {
+  font-size: 12px;
+  color: var(--danger);
+  line-height: 1.5;
+}
+.btn.midi-recording {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-accent);
+  font-weight: 600;
+  animation: midi-rec-pulse 1.2s ease-in-out infinite;
+}
+@keyframes midi-rec-pulse {
+  50% {
+    filter: brightness(1.25);
+  }
+}
+/* alternate between two identical one-shot animations so every note-on
+   restarts the blink (the class swap retriggers it) */
+.midi-pulse-a {
+  animation: midi-note-blink-a 0.25s ease-out;
+}
+.midi-pulse-b {
+  animation: midi-note-blink-b 0.25s ease-out;
+}
+@keyframes midi-note-blink-a {
+  0% {
+    color: var(--accent-2);
+  }
+}
+@keyframes midi-note-blink-b {
+  0% {
+    color: var(--accent-2);
+  }
+}
+
+/* ---- on-screen (simulator) MIDI keyboard -------------------------------- */
+
+.sim-kbd {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 14px;
+  z-index: 70;
+  width: 680px;
+  max-width: calc(100vw - 24px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+.sim-kbd-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.sim-kbd-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.sim-kbd-oct {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.sim-kbd-vel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sim-kbd-vel input {
+  width: 90px;
+}
+.sim-kbd-hint {
+  margin-left: auto;
+  text-align: right;
+}
+.sim-keys {
+  position: relative;
+  height: 118px;
+  user-select: none;
+  touch-action: none;
+}
+.sim-key {
+  position: absolute;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.sim-key.white {
+  height: 100%;
+  background: #f4f1fb;
+  border: 1px solid #b9b2d0;
+  border-radius: 0 0 5px 5px;
+}
+.sim-key.black {
+  height: 62%;
+  background: #221e33;
+  border: 1px solid #0e0c18;
+  border-radius: 0 0 4px 4px;
+  z-index: 2;
+}
+.sim-key.white.held {
+  background: var(--accent);
+}
+.sim-key.black.held {
+  background: var(--accent);
+}
+.sim-key-bind {
+  font-size: 10px;
+  line-height: 1;
+  padding-bottom: 5px;
+  color: #6d6690;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+.sim-key.black .sim-key-bind {
+  color: #9b93b8;
+}
+.sim-key.held .sim-key-bind {
+  color: var(--on-accent);
+}
+.sim-drum-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  margin-bottom: 4px;
+  pointer-events: none;
+}
+
+.btn.midi-disconnect {
+  background: none;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+.btn.midi-disconnect:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
