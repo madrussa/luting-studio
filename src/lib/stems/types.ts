@@ -9,6 +9,7 @@ export type StemName = (typeof STEM_NAMES)[number]
 
 export type DemucsWorkerOut =
   | { type: 'progress'; done: number; total: number }
+  | { type: 'debug'; stage: string }
   | { type: 'done'; stems: Record<StemName, Float32Array> }
   | { type: 'error'; message: string }
 

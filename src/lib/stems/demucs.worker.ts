@@ -8,9 +8,14 @@
 //      { type: 'error', message }
 
 import * as ort from 'onnxruntime-web/wasm'
-// the package's exports map hides dist/, so the runtime binary is imported by
-// file path; the default "bundle" build embeds the JS glue and only needs this
+// the package's exports map hides dist/, so the runtime files are imported by
+// file path. Both the .wasm and the standalone .mjs must be provided: without
+// an explicit mjs, ORT spawns its pthread workers from import.meta.url — in a
+// production build that is THIS bundled chunk, so every thread re-runs this
+// module, clobbers ORT's pthread message handler, and session creation
+// deadlocks (dev never hits it because modules are served unbundled there).
 import ortWasmUrl from '../../../node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm?url'
+import ortMjsUrl from '../../../node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs?url'
 import { STEM_NAMES } from './types'
 import type { StemName } from './types'
 
@@ -21,6 +26,7 @@ const OVERLAP = Math.floor(N_SAMPLES / 4)
 const STRIDE = N_SAMPLES - OVERLAP
 
 const post = self.postMessage.bind(self) as (message: unknown, transfer?: Transferable[]) => void
+const debug = (stage: string) => post({ type: 'debug', stage })
 
 function makeTransitionWindow(segment: number, overlap: number): Float32Array {
   const w = new Float32Array(segment).fill(1)
@@ -33,11 +39,12 @@ function makeTransitionWindow(segment: number, overlap: number): Float32Array {
 }
 
 async function separate(model: ArrayBuffer, left: Float32Array, right: Float32Array) {
-  ort.env.wasm.wasmPaths = { wasm: ortWasmUrl }
+  ort.env.wasm.wasmPaths = { wasm: ortWasmUrl, mjs: ortMjsUrl }
   // multi-threading needs crossOriginIsolated (COOP/COEP); fall back to 1 thread
   ort.env.wasm.numThreads = self.crossOriginIsolated
     ? Math.min(Math.max(1, (navigator.hardwareConcurrency ?? 2) - 1), 4)
     : 1
+  debug(`session:start isolated=${self.crossOriginIsolated} threads=${ort.env.wasm.numThreads}`)
 
   // memory is the constraint, not speed: graph optimization ('basic'/'all')
   // constant-folds the fp16 weights into fp32 copies and the arena
@@ -49,6 +56,7 @@ async function separate(model: ArrayBuffer, left: Float32Array, right: Float32Ar
     enableMemPattern: false,
   })
 
+  debug('session:ready')
   const totalLen = left.length
   const nChunks = Math.max(1, Math.ceil((totalLen - OVERLAP) / STRIDE))
   const win = makeTransitionWindow(N_SAMPLES, OVERLAP)
