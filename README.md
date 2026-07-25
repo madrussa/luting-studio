@@ -27,8 +27,22 @@ notation used by [luteboi.com](https://luteboi.com/)
   computer-keyboard playable, velocity slider, octave shift.
 - **MP3/audio → luting** — best-effort monophonic transcription using
   autocorrelation pitch detection. Works on clean single-line audio
-  (whistling, humming, one instrument); full mixes won't transcribe. Set the
-  song BPM before converting.
+  (whistling, humming, one instrument); full mixes won't transcribe. The song
+  BPM is detected automatically from the audio's onsets (untick "auto-detect"
+  to set it by hand).
+- **Full-mix instrument detection** — an opt-in toggle in the converter
+  for real songs. The mix is separated into stems (drums, bass, guitar,
+  piano, vocals, other) by HT-Demucs running locally via WebAssembly
+  (onnxruntime-web), then each stem is transcribed in parallel Web Workers —
+  melodic stems polyphonically with Spotify's Basic Pitch, the drum stem with
+  an onset classifier that lands hits on the Drumkit. Named stems map to
+  instruments directly (drums → Drumkit, bass → Bass, guitar → Lute,
+  piano → Keyboard); the vocals and "other" stems are matched to an
+  instrument by timbre (brightness, sustain, pluck density — e.g. a synth
+  lead becomes Chiptune, whistling becomes Flute). The song BPM is
+  auto-detected from the audio's onsets. First use downloads a
+  ~131 MB model, cached in the browser afterwards; expect minutes of heavy
+  CPU on a full song, and treat the result as a starting point to edit.
 - **Recording extras** — an optional metronome with a 1-bar count-in (the
   grid locks to the click instead of your first note), and **overdub**: the
   board's song plays while you record, and the take lands aligned to it.

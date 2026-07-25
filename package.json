@@ -11,8 +11,11 @@
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
+    "@spotify/basic-pitch": "^1.0.1",
+    "@tensorflow/tfjs": "^3.21.0",
     "@tonejs/midi": "^2.0.28",
     "lucide-react": "^1.18.0",
+    "onnxruntime-web": "^1.27.0",
     "prismjs": "^1.30.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
