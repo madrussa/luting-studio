@@ -5,6 +5,10 @@
     <link rel="icon" type="image/webp" href="/src/assets/conducting.webp" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Luting Studio</title>
+    <!-- GitHub Pages can't send COOP/COEP headers; this service worker shim
+         injects them so stem separation gets multi-threaded WASM. No-op when
+         the server already sends the headers (e.g. vite dev). -->
+    <script src="./coi-serviceworker.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
