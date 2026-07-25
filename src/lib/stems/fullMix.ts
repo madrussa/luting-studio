@@ -79,7 +79,8 @@ function runDemucs(
     const worker = new Worker(new URL('./demucs.worker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = (e: MessageEvent<DemucsWorkerOut>) => {
       const msg = e.data
-      if (msg.type === 'progress') onProgress(msg.done, msg.total)
+      if (msg.type === 'debug') console.info(`[stems] demucs: ${msg.stage}`)
+      else if (msg.type === 'progress') onProgress(msg.done, msg.total)
       else if (msg.type === 'done') {
         worker.terminate()
         resolve(msg.stems)
