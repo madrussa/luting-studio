@@ -5,8 +5,79 @@ import type { ConvertResult } from "../lib/convert";
 import { convertAudio } from "../lib/pitch";
 import { INSTRUMENTS, importLuting } from "../lib/luting";
 import { unoptimizeLuting } from "../lib/optimize";
-import { FileMusic, Loader2, Import } from "lucide-react";
+import type { FullMixProgress, StemName } from "../lib/stems/types";
+import { FileMusic, Loader2, Import, Check, Minus, AlertTriangle, Sparkles } from "lucide-react";
 import { NumberInput } from "./NumberInput";
+import dumbUrl from "../assets/dumb.webp";
+
+const STEM_LABELS: Record<StemName, string> = {
+  drums: "Drums",
+  bass: "Bass",
+  other: "Other",
+  vocals: "Vocals",
+  guitar: "Guitar",
+  piano: "Piano",
+};
+
+const MB = 1024 * 1024;
+
+function StemProgress({ progress }: { progress: FullMixProgress }) {
+  if (progress.stage === "decode") {
+    return (
+      <span>
+        <Loader2 size={15} className="spin" /> Decoding audio…
+      </span>
+    );
+  }
+  if (progress.stage === "download") {
+    const pct = progress.totalBytes > 0 ? progress.loadedBytes / progress.totalBytes : 0;
+    return (
+      <span className="stem-progress">
+        <span>
+          {progress.fromCache
+            ? "Loading the instrument-separation model from cache…"
+            : `Downloading the instrument-separation model (one-time) — ${Math.round(
+                progress.loadedBytes / MB
+              )} / ${Math.round(progress.totalBytes / MB)} MB`}
+        </span>
+        <span className="progress-track">
+          <span className="progress-fill" style={{ width: `${Math.round(pct * 100)}%` }} />
+        </span>
+      </span>
+    );
+  }
+  if (progress.stage === "separate") {
+    const pct = progress.total > 0 ? progress.done / progress.total : 0;
+    return (
+      <span className="stem-progress">
+        <span>
+          <Loader2 size={15} className="spin" /> Separating instruments — part {Math.min(progress.done + 1, progress.total)} of{" "}
+          {progress.total}
+        </span>
+        <span className="progress-track">
+          <span className="progress-fill" style={{ width: `${Math.round(pct * 100)}%` }} />
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="stem-progress">
+      <span>Transcribing instruments…</span>
+      <span className="stem-chips">
+        {progress.stems.map((s) => (
+          <span key={s.name} className={`stem-chip ${s.state}`}>
+            {s.state === "running" && <Loader2 size={11} className="spin" />}
+            {s.state === "done" && <Check size={11} />}
+            {s.state === "skipped" && <Minus size={11} />}
+            {s.state === "failed" && <AlertTriangle size={11} />}
+            {STEM_LABELS[s.name]}
+            {s.state === "running" && s.pct > 0 ? ` ${Math.round(s.pct * 100)}%` : ""}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+}
 
 interface Props {
   onImport: (result: ConvertResult) => void;
@@ -18,6 +89,9 @@ export function Converter({ onImport }: Props) {
   const [maxVoices, setMaxVoices] = useState(DEFAULT_CONVERT_VOICES);
   const [audioBpm, setAudioBpm] = useState(120);
   const [audioInstrument, setAudioInstrument] = useState("l");
+  const [fullMix, setFullMix] = useState(false);
+  const [autoBpm, setAutoBpm] = useState(true);
+  const [stemProgress, setStemProgress] = useState<FullMixProgress | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [unoptimize, setUnoptimize] = useState(true);
@@ -52,9 +126,20 @@ export function Converter({ onImport }: Props) {
       const isMidi =
         /\.midi?$/i.test(file.name) ||
         (head[0] === 0x4d && head[1] === 0x54 && head[2] === 0x68 && head[3] === 0x64); // "MThd"
-      const result = isMidi
-        ? await convertMidi(buf, maxVoices)
-        : await convertAudio(buf, { bpm: audioBpm, instrument: audioInstrument });
+      let result: ConvertResult;
+      if (isMidi) {
+        result = await convertMidi(buf, maxVoices);
+      } else if (fullMix) {
+        // heavy ML pipeline — loaded on demand so the main bundle stays lean
+        const { convertAudioFullMix } = await import("../lib/stems/fullMix");
+        result = await convertAudioFullMix(buf, { bpm: audioBpm, autoBpm, onProgress: setStemProgress });
+      } else {
+        result = await convertAudio(buf, { bpm: audioBpm, instrument: audioInstrument, autoBpm });
+      }
+      if (!isMidi && autoBpm && result.voices.length > 0) {
+        // reflect the detected tempo back into the field
+        setAudioBpm(Math.round(result.bpm / 4));
+      }
       onImport(result);
       if (result.voices.length === 0) {
         setError("Nothing convertible was found in that file.");
@@ -63,6 +148,7 @@ export function Converter({ onImport }: Props) {
       setError(`Conversion failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setBusy(false);
+      setStemProgress(null);
     }
   };
 
@@ -96,9 +182,13 @@ export function Converter({ onImport }: Props) {
       >
         <input ref={fileInput} type="file" accept=".mid,.midi,audio/*" hidden onChange={onPick} />
         {busy ? (
-          <span>
-            <Loader2 size={15} className="spin" /> Converting…
-          </span>
+          stemProgress ? (
+            <StemProgress progress={stemProgress} />
+          ) : (
+            <span>
+              <Loader2 size={15} className="spin" /> Converting…
+            </span>
+          )
         ) : (
           <span>
             <FileMusic size={15} /> Drop a <strong>MIDI</strong> or <strong>MP3</strong> file here
@@ -106,6 +196,37 @@ export function Converter({ onImport }: Props) {
           </span>
         )}
       </div>
+
+      <label
+        className="convert-check stem-toggle"
+        data-tip="Split a full song into instruments with AI and transcribe each onto the board. Heavy: one-time 131 MB model download, then minutes of in-browser processing."
+      >
+        <span className="switch">
+          <input
+            type="checkbox"
+            checked={fullMix}
+            disabled={busy}
+            onChange={(e) => setFullMix(e.target.checked)}
+          />
+          <span className="switch-slider" />
+        </span>
+        <Sparkles size={14} />
+        Full-mix instrument detection
+      </label>
+      {fullMix && (
+        <div className="stem-warning">
+          <img className="stem-warning-img" src={dumbUrl} alt="" />
+          <div>
+            <div className="stem-warning-title">Slop Mode Activated</div>
+            Dropped audio will be split into instruments (drums, bass, guitar, piano, vocals,
+            other) and each one transcribed onto the board. The first use downloads a{" "}
+            <strong>131&nbsp;MB</strong> model, cached for next time. Everything runs locally in
+            your browser: expect <strong>several minutes</strong> of heavy CPU use and high memory
+            on a full song. The tempo is detected automatically (untick "auto-detect" to set it
+            by hand) — and treat the result as a starting point, not a faithful cover.
+          </div>
+        </div>
+      )}
 
       <div className="paste-row">
         <textarea
@@ -142,21 +263,31 @@ export function Converter({ onImport }: Props) {
         </label>
         <label>
           MP3 song BPM
-          <NumberInput value={audioBpm} onChange={setAudioBpm} min={20} max={300} ariaLabel="MP3 song BPM" />
+          <NumberInput value={audioBpm} onChange={setAudioBpm} min={20} max={300} ariaLabel="MP3 song BPM" disabled={autoBpm} />
         </label>
-        <label>
-          MP3 instrument
-          <select value={audioInstrument} onChange={(e) => setAudioInstrument(e.target.value)}>
-            {INSTRUMENTS.filter((i) => i.code !== "d").map((i) => (
-              <option key={i.code} value={i.code}>
-                {i.icon} {i.name}
-              </option>
-            ))}
-          </select>
+        <label
+          className="convert-check"
+          data-tip="Estimate the tempo from the audio itself (needs a steady pulse). Untick to type the BPM by hand."
+        >
+          <input type="checkbox" checked={autoBpm} onChange={(e) => setAutoBpm(e.target.checked)} />
+          auto-detect
         </label>
+        {!fullMix && (
+          <label>
+            MP3 instrument
+            <select value={audioInstrument} onChange={(e) => setAudioInstrument(e.target.value)}>
+              {INSTRUMENTS.filter((i) => i.code !== "d").map((i) => (
+                <option key={i.code} value={i.code}>
+                  {i.icon} {i.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <span className="convert-note">
-          MP3 conversion detects a single melody line — it works best on clean, monophonic audio
-          (whistling, humming, one instrument). MIDI conversion is accurate.
+          {fullMix
+            ? "Full-mix mode maps stems to instruments automatically: drums → Drumkit, bass → Bass, guitar → Lute, piano → Keyboard. Vocals and anything else are matched to an instrument by their sound — swap any voice's instrument on the board afterwards."
+            : "MP3 conversion detects a single melody line — it works best on clean, monophonic audio (whistling, humming, one instrument). MIDI conversion is accurate."}
         </span>
       </div>
 

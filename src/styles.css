@@ -660,6 +660,142 @@ body {
   max-width: 420px;
 }
 
+/* ---- full-mix instrument detection ---- */
+.stem-toggle {
+  gap: 8px;
+}
+.switch {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  flex: none;
+}
+.switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.switch input:disabled {
+  cursor: default;
+}
+.switch-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.15s;
+  pointer-events: none;
+}
+.switch-slider::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.15s, background 0.15s;
+}
+.switch input:checked + .switch-slider {
+  background: var(--accent);
+}
+.switch input:checked + .switch-slider::before {
+  transform: translateX(16px);
+  background: var(--on-accent);
+}
+.switch input:focus-visible + .switch-slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.stem-warning {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 11px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 640px;
+}
+.stem-warning-img {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border-radius: 8px;
+  object-fit: cover;
+}
+.stem-warning-title {
+  font-weight: 700;
+  color: var(--warn);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 12.5px;
+  margin-bottom: 3px;
+}
+
+.stem-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+}
+.progress-track {
+  display: block;
+  width: min(420px, 90%);
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.2s;
+}
+.stem-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.stem-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.stem-chip.running {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.stem-chip.done {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+}
+.stem-chip.failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.stem-chip.skipped {
+  opacity: 0.55;
+}
+
 /* ---- workspace ---- */
 .workspace {
   display: grid;

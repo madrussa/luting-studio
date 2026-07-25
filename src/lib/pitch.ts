@@ -7,6 +7,7 @@
 import { midiToPitch, clampMidi, serializeVoiceBody } from './luting'
 import type { VoiceEvent } from './luting'
 import type { ConvertResult } from './convert'
+import { detectBpm } from './stems/tempo'
 
 const FRAME = 2048
 const HOP = 512
@@ -67,7 +68,7 @@ function median(values: number[]): number {
 
 export async function convertAudio(
   buf: ArrayBuffer,
-  opts: { bpm: number; instrument: string }
+  opts: { bpm: number; instrument: string; autoBpm?: boolean }
 ): Promise<ConvertResult> {
   const warnings: string[] = []
   const ctx = new AudioContext()
@@ -85,10 +86,22 @@ export async function convertAudio(
     for (let i = 0; i < data.length; i++) mono[i] += data[i] / audio.numberOfChannels
   }
 
-  if (audio.duration > 120) {
-    warnings.push('Audio longer than 2 minutes; only the first 2 minutes were analyzed.')
+  const MAX_SECONDS = 360
+  if (audio.duration > MAX_SECONDS) {
+    warnings.push('Audio longer than 6 minutes; only the first 6 minutes were analyzed.')
   }
-  const analyzeLen = Math.min(mono.length, audio.sampleRate * 120)
+  const analyzeLen = Math.min(mono.length, audio.sampleRate * MAX_SECONDS)
+
+  let songBpm = opts.bpm
+  if (opts.autoBpm) {
+    const est = detectBpm(mono.subarray(0, analyzeLen), audio.sampleRate)
+    if (est) {
+      songBpm = est.bpm
+      warnings.push(`Detected tempo ≈ ${est.bpm} BPM.`)
+    } else {
+      warnings.push(`Could not detect a steady tempo; using the manual BPM (${opts.bpm}).`)
+    }
+  }
 
   // per-frame pitch track (rounded MIDI or null)
   const raw: (number | null)[] = []
@@ -142,11 +155,11 @@ export async function convertAudio(
     warnings.push(
       'Could not detect a melody. Pitch detection needs a clear monophonic source (one voice or instrument at a time); full mixes usually fail.'
     )
-    return { bpm: opts.bpm * 4, voices: [], warnings }
+    return { bpm: Math.round(songBpm * 4), voices: [], warnings }
   }
 
   // quantize to the luting grid (sixteenths at the given BPM)
-  const lutingBpm = opts.bpm * 4
+  const lutingBpm = Math.round(songBpm * 4)
   const unitSec = 60 / lutingBpm
   const events: VoiceEvent[] = []
   let cursor = 0
