@@ -18,6 +18,8 @@ export type TranscribeWorkerIn =
       kind: 'melodic'
       samples: Float32Array // mono 44.1 kHz
       lutingBpm: number
+      /** grid phase measured once on the whole mix, shared by every stem */
+      gridOffsetSec?: number
       /** fallback if timbre classification is off or inconclusive */
       instrument: string
       label: string
@@ -35,6 +37,8 @@ export type TranscribeWorkerIn =
       kind: 'drums'
       samples: Float32Array // mono 44.1 kHz
       lutingBpm: number
+      /** grid phase measured once on the whole mix, shared by every stem */
+      gridOffsetSec?: number
       volume?: number
     }
 

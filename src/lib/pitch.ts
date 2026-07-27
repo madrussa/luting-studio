@@ -6,6 +6,7 @@
 
 import { midiToPitch, clampMidi, serializeVoiceBody } from './luting'
 import type { VoiceEvent } from './luting'
+import { phaseFromOnsets } from './convert'
 import type { ConvertResult } from './convert'
 import { detectBpm } from './stems/tempo'
 
@@ -64,6 +65,54 @@ function detectPitch(buf: Float32Array, sampleRate: number): number | null {
 function median(values: number[]): number {
   const s = [...values].sort((a, b) => a - b)
   return s[Math.floor(s.length / 2)]
+}
+
+export interface DetectedNote {
+  midi: number
+  /** seconds */
+  start: number
+  /** seconds */
+  end: number
+}
+
+/**
+ * Lay a detected melody onto the luting grid.
+ *
+ * The grid is phase-aligned to the melody rather than pinned to t=0, which is
+ * just wherever the file was cut — a performance starting an eighth of a beat
+ * in would otherwise have every onset sitting between grid lines, rounding
+ * whichever way the detection noise leaned.
+ *
+ * Notes are never dropped. A note whose quantized start lands on or before the
+ * previous note's end goes to the next free unit instead; the line is
+ * monophonic, so a note slightly late beats a note missing. `crowded` counts
+ * those, since a large number means the grid is too coarse for the material.
+ */
+export function quantizeMelody(
+  notes: DetectedNote[],
+  unitSec: number
+): { events: VoiceEvent[]; crowded: number } {
+  const phase = phaseFromOnsets(
+    notes.map((n) => n.start),
+    unitSec
+  )
+  const events: VoiceEvent[] = []
+  let cursor = 0
+  let crowded = 0
+  for (const n of notes) {
+    const wanted = Math.max(0, Math.round((n.start - phase) / unitSec))
+    const start = Math.max(wanted, cursor)
+    if (start > wanted) crowded++
+    const end = Math.max(start + 1, Math.round((n.end - phase) / unitSec))
+    if (start > cursor) events.push({ type: 'rest', pitches: [], duration: start - cursor })
+    events.push({
+      type: 'note',
+      pitches: [midiToPitch(clampMidi(n.midi))],
+      duration: end - start,
+    })
+    cursor = end
+  }
+  return { events, crowded }
 }
 
 export async function convertAudio(
@@ -158,27 +207,18 @@ export async function convertAudio(
     return { bpm: Math.round(songBpm * 4), voices: [], warnings }
   }
 
-  // quantize to the luting grid (sixteenths at the given BPM)
   const lutingBpm = Math.round(songBpm * 4)
-  const unitSec = 60 / lutingBpm
-  const events: VoiceEvent[] = []
-  let cursor = 0
-  for (const n of notes) {
-    const start = Math.round(n.start / unitSec)
-    const end = Math.max(start + 1, Math.round(n.end / unitSec))
-    if (start > cursor) events.push({ type: 'rest', pitches: [], duration: start - cursor })
-    if (start < cursor) continue // overlap after quantization; drop
-    events.push({
-      type: 'note',
-      pitches: [midiToPitch(clampMidi(n.midi))],
-      duration: end - start,
-    })
-    cursor = end
-  }
+  const { events, crowded } = quantizeMelody(notes, 60 / lutingBpm)
 
   warnings.push(
     `Detected ${notes.length} notes. Audio transcription is approximate — expect to tidy the result by hand.`
   )
+  if (crowded > 0) {
+    warnings.push(
+      `${crowded} note${crowded === 1 ? ' was' : 's were'} shorter than one grid unit and had to be pushed to the ` +
+        `next one — raise the BPM for a finer grid if the timing drifts.`
+    )
+  }
 
   return {
     bpm: lutingBpm,

@@ -3,7 +3,7 @@
 // classifier per onset (kick / snare / closed hat / open hat / crash), mapped
 // onto the luteboi Drumkit pitches used by the MIDI converter.
 
-import { allocate } from '../convert'
+import { allocate, gridPhase } from '../convert'
 import type { ConvertedVoice } from '../convert'
 import { serializeVoiceBody } from '../luting'
 import type { Pitch } from '../luting'
@@ -116,18 +116,20 @@ export function drumsToVoices(
   samples: Float32Array,
   sampleRate: number,
   lutingBpm: number,
-  opts: { maxVoices?: number; volume?: number } = {}
+  opts: { maxVoices?: number; volume?: number; gridOffsetSec?: number } = {}
 ): ConvertedVoice[] {
   const maxVoices = opts.maxVoices ?? 3
   const onsets = detectDrumOnsets(samples, sampleRate)
   if (onsets.length === 0) return []
   const unit = 60 / lutingBpm
+  // same mix-wide grid phase the melodic stems use, so the kit stays in step
+  const phase = gridPhase(opts.gridOffsetSec ?? 0, unit)
 
   // one group per (instant, drum), duration 1 unit — same as the MIDI path
   const seen = new Set<string>()
   const groups: { start: number; dur: number; pitches: Pitch[]; velocity: number }[] = []
   for (const o of onsets) {
-    const start = Math.max(0, Math.round(o.timeSec / unit))
+    const start = Math.max(0, Math.round((o.timeSec - phase) / unit))
     for (const p of o.pitches) {
       const key = `${start}:o${p.octave}${p.letter}`
       if (seen.has(key)) continue

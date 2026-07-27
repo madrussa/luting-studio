@@ -111,6 +111,44 @@ export interface SubVoice {
 }
 
 /**
+ * Fold a beat offset into the sub-unit phase to quantize against, centred on
+ * zero so `round((t - phase) / unit)` still puts notes at their true absolute
+ * position. Whole units are dropped: shifting the phase by one would slide the
+ * entire transcription a unit earlier or later for no gain in alignment.
+ */
+export function gridPhase(offsetSec: number, unitSec: number): number {
+  if (!isFinite(offsetSec) || unitSec <= 0) return 0
+  const phase = ((offsetSec % unitSec) + unitSec) % unitSec
+  return phase > unitSec / 2 ? phase - unitSec : phase
+}
+
+/**
+ * The sub-unit grid phase that puts a set of onsets closest to grid lines, by
+ * least squares. For sources where the onsets themselves are the best evidence
+ * of where the grid sits (a detected melody), rather than an onset envelope.
+ */
+export function phaseFromOnsets(onsetsSec: number[], unitSec: number): number {
+  if (onsetsSec.length === 0 || unitSec <= 0) return 0
+  const STEPS = 48
+  let best = 0
+  let bestErr = Infinity
+  for (let s = 0; s < STEPS; s++) {
+    const phase = (s / STEPS) * unitSec
+    let sum = 0
+    for (const t of onsetsSec) {
+      const x = (t - phase) / unitSec
+      const d = x - Math.round(x)
+      sum += d * d
+    }
+    if (sum < bestErr) {
+      bestErr = sum
+      best = phase
+    }
+  }
+  return gridPhase(best, unitSec)
+}
+
+/**
  * Greedy sub-voice allocation: each (start, dur, pitches) group goes to the
  * first sub-voice that is free at its start time; gaps become rests.
  * Shared with the live MIDI recorder.

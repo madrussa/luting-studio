@@ -16,6 +16,14 @@ export interface TempoEstimate {
   bpm: number
   /** normalized autocorrelation of the winning lag, roughly 0..1 */
   confidence: number
+  /**
+   * Seconds from the start of the audio to the first beat — the grid's phase.
+   * Quantizing without it pins the grid to t=0, which is wherever the file
+   * happens to have been cut, so a performance's onsets can sit half a grid
+   * unit off every line and each note then rounds whichever way the noise
+   * leans.
+   */
+  offsetSec: number
 }
 
 /** Onset strength envelope: half-wave rectified spectral flux per hop. */
@@ -51,6 +59,44 @@ function onsetEnvelope(samples: Float32Array, sampleRate: number): Float32Array 
     out[i] = Math.max(0, flux[i] - sum / n)
   }
   return out
+}
+
+/**
+ * Beat phase for a known period: the comb of beat positions that collects the
+ * most onset strength. Returned in envelope frames.
+ */
+function combPhase(env: Float32Array, lagFrames: number): number {
+  const lag = Math.max(1, lagFrames)
+  const span = Math.max(1, Math.round(lag))
+  let best = 0
+  let bestSum = -Infinity
+  for (let phase = 0; phase < span; phase++) {
+    let sum = 0
+    // step by the fractional period and round per tooth; stepping by a rounded
+    // lag instead would drift a frame every few beats and smear the comb
+    for (let k = 0; ; k++) {
+      const i = Math.round(phase + k * lag)
+      if (i >= env.length) break
+      sum += env[i]
+    }
+    if (sum > bestSum) {
+      bestSum = sum
+      best = phase
+    }
+  }
+  return best
+}
+
+/**
+ * Grid phase in seconds for a tempo the caller already knows (the manual-BPM
+ * path, where detectBpm never runs). 0 if the audio is too short to tell.
+ */
+export function detectBeatOffset(samples: Float32Array, sampleRate: number, bpm: number): number {
+  const env = onsetEnvelope(samples, sampleRate)
+  const fps = sampleRate / HOP
+  const lag = (60 / Math.max(1, bpm)) * fps
+  if (env.length < lag * 2) return 0
+  return combPhase(env, lag) / fps
 }
 
 export function detectBpm(samples: Float32Array, sampleRate: number): TempoEstimate | null {
@@ -103,5 +149,8 @@ export function detectBpm(samples: Float32Array, sampleRate: number): TempoEstim
   // fold into the range people actually tap along to
   while (bpm > 165) bpm /= 2
   while (bpm < 55) bpm *= 2
-  return { bpm: Math.round(bpm * 10) / 10, confidence: corr[bestLag] }
+  bpm = Math.round(bpm * 10) / 10
+  // phase against the folded tempo, so it lines up with the BPM we report
+  const offsetSec = combPhase(env, (60 / bpm) * fps) / fps
+  return { bpm, confidence: corr[bestLag], offsetSec }
 }
