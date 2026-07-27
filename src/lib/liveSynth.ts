@@ -23,6 +23,8 @@ import { GM_DRUM } from './convert'
 
 let ctx: AudioContext | null = null
 let master: GainNode | null = null
+/** last value written to master.gain, so note-on doesn't re-automate it */
+let masterTarget = Number.NaN
 
 /**
  * Create (or resume) the live audio context. Must be called from a user
@@ -34,7 +36,8 @@ export function ensureLiveAudio(): AudioContext {
   if (!ctx) {
     ctx = new AudioContext()
     master = ctx.createGain()
-    master.gain.value = BASE_GAIN * getMasterVolume()
+    masterTarget = BASE_GAIN * getMasterVolume()
+    master.gain.value = masterTarget
     const comp = ctx.createDynamicsCompressor()
     master.connect(comp)
     comp.connect(ctx.destination)
@@ -50,9 +53,17 @@ interface LiveNote {
   kill: (at: number) => void
 }
 
+// Held notes are scoped by source device as well as key: two controllers (or
+// one controller's two mirror ports) playing the same pitch used to collide
+// here, and the collision leaked voices — the second note-on overwrote the
+// first's entry, the first note-off released the second's nodes and cleared
+// the map, and the second note-off then found nothing, leaving the original
+// graph running until its 60s/120s stuck-note net. Enough of those and the
+// audio thread is rendering a pile of inaudible voices, which is heard as
+// growing latency.
 const held = new Map<string, LiveNote>()
 
-const noteKey = (instrument: string, midi: number) => `${instrument}:${midi}`
+const noteKey = (device: string, instrument: string, midi: number) => `${device}:${instrument}:${midi}`
 
 /** velocity 0..1 -> luting-ish volume: quiet touches stay audible */
 const velToVol = (velocity: number) => 0.3 + 0.7 * Math.min(1, Math.max(0, velocity))
@@ -199,12 +210,18 @@ function liveOneShot(c: AudioContext, dest: AudioNode, instrument: string, midi:
  * banks sustain while the key is held — falling back to the built-in synth
  * until the pack has loaded (or for the always-synthesized instruments).
  */
-export function liveNoteOn(instrument: string, midi: number, velocity: number) {
+export function liveNoteOn(instrument: string, midi: number, velocity: number, device = 'default') {
   if (!ctx || !master) return // not enabled yet
   if (ctx.state === 'suspended') void ctx.resume()
-  master.gain.setTargetAtTime(BASE_GAIN * getMasterVolume(), ctx.currentTime, 0.02)
+  // only when it actually moved: every call appends an automation event to the
+  // param's event list, and this runs on every key press
+  const target = BASE_GAIN * getMasterVolume()
+  if (target !== masterTarget) {
+    masterTarget = target
+    master.gain.setTargetAtTime(target, ctx.currentTime, 0.02)
+  }
 
-  const key = noteKey(instrument, midi)
+  const key = noteKey(device, instrument, midi)
   const start = ctx.currentTime
   // retrigger: damp the still-held instance of this key first
   held.get(key)?.kill(start)
@@ -226,11 +243,27 @@ export function liveNoteOn(instrument: string, midi: number, velocity: number) {
   held.set(key, note)
 }
 
-export function liveNoteOff(instrument: string, midi: number) {
+export function liveNoteOff(instrument: string, midi: number, device = 'default') {
   if (!ctx) return
-  const key = noteKey(instrument, midi)
+  const key = noteKey(device, instrument, midi)
   held.get(key)?.release(ctx.currentTime)
   held.delete(key)
+}
+
+/**
+ * Release everything a single device is holding. Unplugging mid-note means its
+ * note-offs never arrive, so without this the voices would sit in the graph
+ * until their stuck-note safety net fires a minute or two later.
+ */
+export function stopLiveForDevice(device: string) {
+  if (!ctx) return
+  const at = ctx.currentTime
+  const prefix = `${device}:`
+  for (const [key, note] of [...held]) {
+    if (!key.startsWith(prefix)) continue
+    note.release(at)
+    held.delete(key)
+  }
 }
 
 /** Release everything (device switch, panel closed, recording aborted). */

@@ -13,7 +13,15 @@ import {
   disableMidi,
 } from '../lib/midi'
 import type { MidiDevice } from '../lib/midi'
-import { ensureLiveAudio, liveNoteOn, liveNoteOff, stopAllLive, startMetronome, stopMetronome } from '../lib/liveSynth'
+import {
+  ensureLiveAudio,
+  liveNoteOn,
+  liveNoteOff,
+  stopAllLive,
+  stopLiveForDevice,
+  startMetronome,
+  stopMetronome,
+} from '../lib/liveSynth'
 import { getPlaybackMode, subscribePlaybackMode, loadBank } from '../lib/samples'
 import { playLuting, stopPlayback, getActivePlaybackId } from '../lib/player'
 import { createMidiRecorder } from '../lib/midiRecord'
@@ -46,14 +54,57 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
   const [overdubOn, setOverdubOn] = useState(false)
   const [noteCount, setNoteCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  // a dot that blinks when a key is pressed, as a "signal is arriving" check
-  const [pulse, setPulse] = useState(0)
 
   const instrumentRef = useRef(instrument)
   instrumentRef.current = instrument
   const recorderRef = useRef<MidiRecorder | null>(null)
   // a pending count-in-delayed overdub playback start, so stop can cancel it
   const overdubTimerRef = useRef<number | null>(null)
+  // devices as of the last refresh, to spot ones that have gone away
+  const knownRef = useRef<MidiDevice[]>([])
+
+  // MIDI messages are delivered on the main thread, so the note path must not
+  // trigger React work per event — a re-render per key press (worse with the
+  // on-screen keyboard mounted, worse again with several ports feeding in) is
+  // rendering time stolen from the messages queued behind it. The blink is a
+  // direct class swap and the note tally is batched.
+  const iconRef = useRef<SVGSVGElement | null>(null)
+  const blinkFlip = useRef(false)
+  const blink = () => {
+    const el = iconRef.current
+    if (!el) return
+    blinkFlip.current = !blinkFlip.current
+    // alternating one-shot animations: removing the old class restarts it
+    el.classList.remove(blinkFlip.current ? 'midi-pulse-b' : 'midi-pulse-a')
+    el.classList.add(blinkFlip.current ? 'midi-pulse-a' : 'midi-pulse-b')
+  }
+
+  const liveCountRef = useRef(0)
+  const countFlushRef = useRef<number | null>(null)
+  const flushCount = () => {
+    if (countFlushRef.current !== null) return
+    countFlushRef.current = window.setTimeout(() => {
+      countFlushRef.current = null
+      setNoteCount(liveCountRef.current)
+    }, 120)
+  }
+
+  /** re-read the device list, releasing notes held by anything unplugged */
+  const refreshDevices = () => {
+    const next = getMidiDevices()
+    const present = new Set(next.map((d) => d.id))
+    for (const d of knownRef.current) {
+      if (!present.has(d.id)) stopLiveForDevice(d.id) // no note-offs are coming
+    }
+    // don't leave the filter pointed at a device that's gone, or nothing plays
+    const selected = getMidiInput()
+    if (selected !== 'all' && !present.has(selected)) {
+      setMidiInput('all')
+      setInput('all')
+    }
+    knownRef.current = next
+    setDevices(next)
+  }
 
   // one subscription for the panel's lifetime: live-play every event, and
   // feed the recorder when a take is running
@@ -62,22 +113,24 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
     const unsubNotes = subscribeMidiNotes((ev) => {
       const ins = instrumentRef.current
       if (ev.kind === 'on') {
-        liveNoteOn(ins, ev.midi, ev.velocity)
-        setPulse((p) => p + 1)
+        liveNoteOn(ins, ev.midi, ev.velocity, ev.deviceId)
+        blink()
       } else {
-        liveNoteOff(ins, ev.midi)
+        liveNoteOff(ins, ev.midi, ev.deviceId)
       }
       const rec = recorderRef.current
       if (rec) {
-        if (ev.kind === 'on') rec.noteOn(ev.midi, ev.velocity, ev.timeMs)
-        else rec.noteOff(ev.midi, ev.timeMs)
-        setNoteCount(rec.noteCount())
+        if (ev.kind === 'on') rec.noteOn(ev.midi, ev.velocity, ev.timeMs, ev.deviceId)
+        else rec.noteOff(ev.midi, ev.timeMs, ev.deviceId)
+        liveCountRef.current = rec.noteCount()
+        flushCount()
       }
     })
-    const unsubDevices = subscribeMidiDevices(() => setDevices(getMidiDevices()))
+    const unsubDevices = subscribeMidiDevices(refreshDevices)
     return () => {
       unsubNotes()
       unsubDevices()
+      if (countFlushRef.current !== null) window.clearTimeout(countFlushRef.current)
     }
   }, [activated])
 
@@ -104,7 +157,7 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
     if (isMidiSupported()) {
       // don't block the panel on the permission prompt
       enableMidi()
-        .then(() => setDevices(getMidiDevices()))
+        .then(() => refreshDevices())
         .catch((e) => setError(e instanceof Error ? e.message : 'MIDI access was denied.'))
     } else {
       setError('This browser has no Web MIDI — hardware needs Chrome or Edge. The on-screen keyboard still works.')
@@ -115,7 +168,7 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
     const next = !simOn
     setSimOn(next)
     setSimActive(next)
-    setDevices(getMidiDevices())
+    refreshDevices()
   }
 
   // Fully let go of the browser's device access (clears the "site is using
@@ -128,6 +181,7 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
     setSimOn(false)
     setSimActive(false)
     disableMidi()
+    knownRef.current = []
     setDevices([])
     setError(null)
     setActivated(false)
@@ -148,6 +202,10 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
       stopOverdub()
       const result = recorderRef.current.finish(performance.now())
       recorderRef.current = null
+      if (countFlushRef.current !== null) {
+        window.clearTimeout(countFlushRef.current)
+        countFlushRef.current = null
+      }
       setRecording(false)
       onRecorded(result)
     } else {
@@ -172,6 +230,7 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
         }
       }
       recorderRef.current = createMidiRecorder(bpm, instrument, { anchorMs })
+      liveCountRef.current = 0
       setNoteCount(0)
       setRecording(true)
     }
@@ -191,7 +250,9 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
         }
         onClick={() => (activated ? setOpen(!open) : connect())}
       >
-        <KeyboardMusic size={15} className={pulse % 2 ? 'midi-pulse-a' : 'midi-pulse-b'} />
+        {/* no className here: the blink is applied via classList off the MIDI
+            thread, and a React-managed className would fight it */}
+        <KeyboardMusic size={15} ref={iconRef} />
         MIDI
       </button>
 

@@ -106,6 +106,49 @@ describe('createMidiRecorder', () => {
     ])
   })
 
+  it('keeps two devices playing the same key apart', () => {
+    const rec = createMidiRecorder(BPM, 'l')
+    rec.noteOn(60, 0.8, 0, 'keyboard')
+    rec.noteOn(60, 0.8, 0, 'pad') // same pitch, other device — must not close the first
+    rec.noteOff(60, UNIT, 'pad')
+    rec.noteOff(60, UNIT * 4, 'keyboard')
+    const r = rec.finish(UNIT * 4.2)
+
+    expect(r.voices).toHaveLength(2) // same start, different lengths
+    const lengths = r.voices
+      .map((v) => parseLuting(`#lute ${BPM} il${v.body}`).notes[0])
+      .map((n) => Math.round(n.durSec / (60 / BPM)))
+      .sort((a, b) => a - b)
+    expect(lengths).toEqual([1, 4])
+  })
+
+  it('anchors past a stray note that never makes it into the take', () => {
+    const rec = createMidiRecorder(BPM, 'd')
+    // a pad fires a key with no luteboi drum sound before the player starts
+    rec.noteOn(127, 1, 0, 'pad')
+    rec.noteOff(127, 50, 'pad')
+    rec.noteOn(36, 1, UNIT * 8, 'keys') // the real take, 8 units later
+    rec.noteOff(36, UNIT * 8 + 50, 'keys')
+    rec.noteOn(38, 1, UNIT * 9, 'keys')
+    rec.noteOff(38, UNIT * 9 + 50, 'keys')
+    const r = rec.finish(UNIT * 10)
+
+    const notes = parseLuting(`#lute ${BPM} id${r.voices[0].body}`).notes
+    const unitSec = 60 / BPM
+    // grid zero is the first *surviving* note, so there are no leading rests
+    expect(notes.map((n) => Math.round(n.timeSec / unitSec))).toEqual([0, 1])
+  })
+
+  it('flags a take that arrived from more than one device', () => {
+    const rec = createMidiRecorder(BPM, 'l')
+    rec.noteOn(60, 0.8, 0, 'a')
+    rec.noteOff(60, UNIT, 'a')
+    rec.noteOn(64, 0.8, UNIT, 'b')
+    rec.noteOff(64, UNIT * 2, 'b')
+    const r = rec.finish(UNIT * 3)
+    expect(r.warnings.some((w) => w.includes('2 devices'))).toBe(true)
+  })
+
   it('records velocity as the voice volume', () => {
     const rec = createMidiRecorder(BPM, 'l')
     rec.noteOn(60, 0.5, 0)

@@ -2,8 +2,9 @@
 // Notes are captured with real timestamps while the player plays, then
 // quantized to the luting grid (one t1 unit = 60/bpm seconds — a sixteenth
 // when the luting BPM is 4x the song BPM, as this app's convention has it).
-// The grid is anchored at the FIRST note-on, so there's no count-in: press
-// record, start playing whenever, and the take begins on your first note.
+// The grid is anchored at the first note that lands in the take, so there's no
+// count-in: press record, start playing whenever, and the take begins on your
+// first note.
 // Mirrors the MIDI-file converter: simultaneous equal-length notes become
 // chords, remaining overlaps spill into extra voices.
 
@@ -28,11 +29,12 @@ interface TakenNote {
   onMs: number
   offMs: number
   velocity: number
+  device: string
 }
 
 export interface MidiRecorder {
-  noteOn: (midi: number, velocity: number, timeMs: number) => void
-  noteOff: (midi: number, timeMs: number) => void
+  noteOn: (midi: number, velocity: number, timeMs: number, device?: string) => void
+  noteOff: (midi: number, timeMs: number, device?: string) => void
   /** notes captured so far (open ones included) */
   noteCount: () => number
   /** true once the first note-on has arrived (the grid anchor) */
@@ -53,60 +55,92 @@ export interface RecorderOptions {
 
 export function createMidiRecorder(lutingBpm: number, instrument: string, opts: RecorderOptions = {}): MidiRecorder {
   const unitMs = 60000 / Math.max(1, lutingBpm)
-  const open = new Map<number, { onMs: number; velocity: number }>()
+  // keyed by device+key, not key alone: with two controllers connected, a
+  // press on one used to close the other's still-held note of the same pitch
+  const open = new Map<string, { midi: number; onMs: number; velocity: number; device: string }>()
   const done: TakenNote[] = []
   let anchor: number | null = opts.anchorMs ?? null
 
-  const close = (midi: number, timeMs: number) => {
-    const o = open.get(midi)
+  const openKey = (device: string, midi: number) => `${device}:${midi}`
+
+  const close = (device: string, midi: number, timeMs: number) => {
+    const key = openKey(device, midi)
+    const o = open.get(key)
     if (!o) return
-    open.delete(midi)
-    done.push({ midi, onMs: o.onMs, offMs: timeMs, velocity: o.velocity })
+    open.delete(key)
+    done.push({ midi: o.midi, onMs: o.onMs, offMs: timeMs, velocity: o.velocity, device: o.device })
   }
 
   return {
-    noteOn(midi, velocity, timeMs) {
+    noteOn(midi, velocity, timeMs, device = 'default') {
       if (anchor === null) anchor = timeMs
-      close(midi, timeMs) // retrigger of a held key ends the first press
-      open.set(midi, { onMs: timeMs, velocity })
+      close(device, midi, timeMs) // retrigger of a held key ends the first press
+      open.set(openKey(device, midi), { midi, onMs: timeMs, velocity, device })
     },
-    noteOff(midi, timeMs) {
-      close(midi, timeMs)
+    noteOff(midi, timeMs, device = 'default') {
+      close(device, midi, timeMs)
     },
     noteCount: () => done.length + open.size,
     started: () => anchor !== null,
     finish(timeMs) {
-      for (const midi of [...open.keys()]) close(midi, timeMs)
+      for (const key of [...open.values()]) close(key.device, key.midi, timeMs)
       const warnings: string[] = []
       if (done.length === 0 || anchor === null) {
         return { voices: [], warnings: ['Nothing was recorded — no notes arrived.'] }
       }
 
       const isDrum = instrument === 'd'
-      const quantized: { start: number; dur: number; pitch: Pitch; velocity: number }[] = []
+      const explicitAnchor = opts.anchorMs !== undefined
+
+      // Resolve pitches before choosing grid zero. Drum mapping can drop a
+      // note entirely, and with several devices connected a stray note-on from
+      // one of them (a pad waking up, a controller echoing) can easily be the
+      // take's first event — anchoring on it and then dropping it left the
+      // whole performance behind a wall of leading rests.
       const unmapped = new Set<number>()
+      const kept: { onMs: number; offMs: number; pitch: Pitch; velocity: number; device: string }[] = []
       for (const n of done) {
-        if (n.offMs <= anchor) continue // released during the count-in
-        const onMs = Math.max(n.onMs, anchor) // held across the anchor -> starts at 0
-        const start = Math.max(0, Math.round((onMs - anchor) / unitMs))
+        if (explicitAnchor && n.offMs <= anchor) continue // released during the count-in
+        let pitch: Pitch
         if (isDrum) {
           // GM drum note if the pad sends one, else the luteboi drum-map pitch
-          const pitch = GM_DRUM[n.midi] ?? midiToPitch(n.midi)
+          pitch = GM_DRUM[n.midi] ?? midiToPitch(n.midi)
           if (!DRUM_SOUNDS[`o${pitch.octave}${pitch.letter[0]}`]) {
             unmapped.add(n.midi)
             continue
           }
-          quantized.push({ start, dur: 1, pitch, velocity: n.velocity })
         } else {
-          const dur = Math.max(1, Math.round((n.offMs - onMs) / unitMs))
-          quantized.push({ start, dur, pitch: midiToPitch(clampMidi(n.midi)), velocity: n.velocity })
+          pitch = midiToPitch(clampMidi(n.midi))
         }
+        kept.push({ onMs: n.onMs, offMs: n.offMs, pitch, velocity: n.velocity, device: n.device })
       }
       if (unmapped.size > 0) {
         warnings.push(`${unmapped.size} drum key${unmapped.size === 1 ? '' : 's'} had no luteboi drum sound and were skipped.`)
       }
-      if (quantized.length === 0) {
+      if (kept.length === 0) {
         return { voices: [], warnings: [...warnings, 'Nothing was recorded — no notes survived the drum mapping.'] }
+      }
+
+      // Without an explicit grid zero the take starts on its first *surviving*
+      // note, so a dropped or stray lead-in can't shift everything late.
+      const gridZero = explicitAnchor ? anchor : Math.min(...kept.map((k) => k.onMs))
+      const sources = new Set(kept.map((k) => k.device))
+      if (sources.size > 1) {
+        warnings.push(
+          `Notes came from ${sources.size} devices — pick one in the Device menu if the take isn't what you played.`
+        )
+      }
+
+      const quantized: { start: number; dur: number; pitch: Pitch; velocity: number }[] = []
+      for (const k of kept) {
+        const onMs = Math.max(k.onMs, gridZero) // held across the anchor -> starts at 0
+        const start = Math.max(0, Math.round((onMs - gridZero) / unitMs))
+        if (isDrum) {
+          quantized.push({ start, dur: 1, pitch: k.pitch, velocity: k.velocity })
+        } else {
+          const dur = Math.max(1, Math.round((k.offMs - onMs) / unitMs))
+          quantized.push({ start, dur, pitch: k.pitch, velocity: k.velocity })
+        }
       }
 
       // Group simultaneous equal-length notes into chords (melodic only; the
