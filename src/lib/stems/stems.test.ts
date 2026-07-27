@@ -59,6 +59,37 @@ describe('notesToVoices', () => {
     expect(notesToVoices([], BPM, 'k', 'Piano')).toHaveLength(0)
   })
 
+  // a stem played on a grid half a unit out of step with the file, where
+  // rounding is a coin toss and the performance's own jitter decides it
+  const HALF_OFF = UNIT / 2
+  const JITTER = [0.002, -0.003, 0.002, -0.003]
+  const times = (notes: Parameters<typeof notesToVoices>[0]) =>
+    parseLuting(
+      `#lute ${BPM} ik${notesToVoices(notes, BPM, 'k', 'Stem', { gridOffsetSec: HALF_OFF })[0].body}`
+    ).notes.map((n) => n.timeSec)
+
+  it('quantizes against the mix-wide grid phase', () => {
+    const notes = JITTER.map((j, k) => ({
+      startSec: HALF_OFF + k * UNIT + j,
+      durSec: UNIT,
+      midi: 60 + k,
+      amplitude: 0.8,
+    }))
+    const voices = notesToVoices(notes, BPM, 'k', 'Piano', { gridOffsetSec: HALF_OFF })
+    expect(voices).toHaveLength(1)
+    const parsed = parseLuting(`#lute ${BPM} ik${voices[0].body}`)
+    // four separate notes, one per unit — off-phase, the pairs collapse onto
+    // one unit each and a melody comes out as two chords
+    expect(parsed.notes.map((n) => n.midi)).toEqual([60, 61, 62, 63])
+    expect(new Set(parsed.notes.map((n) => n.timeSec)).size).toBe(4)
+  })
+
+  it('keeps a loosely played stem in step with a tight one', () => {
+    const clean = [0, 1, 2, 3].map((k) => ({ startSec: HALF_OFF + k * UNIT, durSec: UNIT, midi: 60, amplitude: 0.8 }))
+    const loose = JITTER.map((j, k) => ({ startSec: HALF_OFF + k * UNIT + j, durSec: UNIT, midi: 48, amplitude: 0.8 }))
+    expect(times(loose)).toEqual(times(clean))
+  })
+
   it('honors an explicit stem volume', () => {
     const voices = notesToVoices(
       [{ startSec: 0, durSec: UNIT, midi: 60, amplitude: 0.9 }],

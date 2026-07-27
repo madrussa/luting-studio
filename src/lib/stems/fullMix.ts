@@ -5,7 +5,7 @@
 
 import type { ConvertResult, ConvertedVoice } from '../convert'
 import { fetchModelCached } from './modelCache'
-import { detectBpm } from './tempo'
+import { detectBpm, detectBeatOffset } from './tempo'
 import { STEM_NAMES } from './types'
 import type { DemucsWorkerOut, FullMixProgress, StemName, StemState, TranscribeWorkerIn, TranscribeWorkerOut } from './types'
 
@@ -29,7 +29,7 @@ interface StemPlan {
   order: number
 }
 
-function stemPlans(lutingBpm: number, modelUrl: string): Record<StemName, StemPlan> {
+function stemPlans(lutingBpm: number, gridOffsetSec: number, modelUrl: string): Record<StemName, StemPlan> {
   const melodic = (
     name: StemName,
     instrument: string,
@@ -39,10 +39,10 @@ function stemPlans(lutingBpm: number, modelUrl: string): Record<StemName, StemPl
   ): StemPlan => ({
     name,
     order,
-    msg: { kind: 'melodic', lutingBpm, instrument, label, modelUrl, ...extra },
+    msg: { kind: 'melodic', lutingBpm, gridOffsetSec, instrument, label, modelUrl, ...extra },
   })
   return {
-    drums: { name: 'drums', order: 0, msg: { kind: 'drums', lutingBpm } },
+    drums: { name: 'drums', order: 0, msg: { kind: 'drums', lutingBpm, gridOffsetSec } },
     bass: melodic('bass', 'b', 'Bass', 1, { maxFreq: 500 }),
     guitar: melodic('guitar', 'l', 'Guitar', 2),
     piano: melodic('piano', 'k', 'Piano', 3),
@@ -138,18 +138,25 @@ export async function convertAudioFullMix(
     warnings.push(`Audio longer than ${MAX_SECONDS / 60} minutes; only the first ${MAX_SECONDS / 60} minutes were analyzed.`)
   }
 
+  const mono = new Float32Array(left.length)
+  for (let i = 0; i < mono.length; i++) mono[i] = 0.5 * (left[i] + right[i])
+
   let songBpm = opts.bpm
+  // Where the grid sits, measured once on the mix so that every stem quantizes
+  // against the same phase. Measuring per stem would let a sparse one (a held
+  // bass line) settle on a different phase and land out of step with the rest.
+  let gridOffsetSec: number | null = null
   if (opts.autoBpm) {
-    const mono = new Float32Array(left.length)
-    for (let i = 0; i < mono.length; i++) mono[i] = 0.5 * (left[i] + right[i])
     const est = detectBpm(mono, SAMPLE_RATE)
     if (est) {
       songBpm = est.bpm
+      gridOffsetSec = est.offsetSec
       warnings.push(`Detected tempo ≈ ${est.bpm} BPM.`)
     } else {
       warnings.push(`Could not detect a steady tempo; using the manual BPM (${opts.bpm}).`)
     }
   }
+  if (gridOffsetSec === null) gridOffsetSec = detectBeatOffset(mono, SAMPLE_RATE, songBpm)
   const lutingBpm = Math.round(songBpm * 4)
 
   const model = await fetchModelCached(DEMUCS_MODEL_URL, (p) =>
@@ -161,7 +168,7 @@ export async function convertAudioFullMix(
   )
 
   const basicPitchModelUrl = new URL(`${import.meta.env.BASE_URL}basic-pitch/model.json`, window.location.href).href
-  const plans = stemPlans(lutingBpm, basicPitchModelUrl)
+  const plans = stemPlans(lutingBpm, gridOffsetSec, basicPitchModelUrl)
 
   const states = new Map<StemName, { state: StemState; pct: number }>()
   for (const name of STEM_NAMES) states.set(name, { state: 'pending', pct: 0 })

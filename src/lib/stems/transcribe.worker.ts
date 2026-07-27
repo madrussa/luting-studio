@@ -109,12 +109,18 @@ async function transcribeMelodic(msg: Extract<TranscribeWorkerIn, { kind: 'melod
   if (msg.mono) notes = monophonicReduce(notes)
   // rejoin fragments the thresholds still split (gap of up to half a grid unit)
   notes = mergeSustains(notes, Math.max(0.08, 30 / msg.lutingBpm))
-  const voices = notesToVoices(notes, msg.lutingBpm, instrument, msg.label, { volume: msg.volume })
+  const voices = notesToVoices(notes, msg.lutingBpm, instrument, msg.label, {
+    volume: msg.volume,
+    gridOffsetSec: msg.gridOffsetSec,
+  })
   post({ type: 'done', voices })
 }
 
 function transcribeDrumStem(msg: Extract<TranscribeWorkerIn, { kind: 'drums' }>) {
-  const voices = drumsToVoices(msg.samples, SOURCE_RATE, msg.lutingBpm, { volume: msg.volume })
+  const voices = drumsToVoices(msg.samples, SOURCE_RATE, msg.lutingBpm, {
+    volume: msg.volume,
+    gridOffsetSec: msg.gridOffsetSec,
+  })
   post({ type: 'done', voices })
 }
 

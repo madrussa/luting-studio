@@ -3,7 +3,7 @@
 // grid, group simultaneous equal-length notes into chords, spill remaining
 // overlaps into extra sub-voices.
 
-import { allocate } from '../convert'
+import { allocate, gridPhase } from '../convert'
 import type { ConvertedVoice } from '../convert'
 import { midiToPitch, clampMidi, serializeVoiceBody, instrumentByCode } from '../luting'
 import type { Pitch } from '../luting'
@@ -112,11 +112,14 @@ export function notesToVoices(
   lutingBpm: number,
   instrument: string,
   label: string,
-  opts: { maxVoices?: number; volume?: number } = {}
+  opts: { maxVoices?: number; volume?: number; gridOffsetSec?: number } = {}
 ): ConvertedVoice[] {
   const maxVoices = opts.maxVoices ?? 4
   if (notes.length === 0) return []
   const unit = 60 / lutingBpm
+  // The phase comes from the whole mix, not from this stem: every stem has to
+  // quantize against the same grid or they land out of step with each other.
+  const phase = gridPhase(opts.gridOffsetSec ?? 0, unit)
 
   interface Quant {
     start: number
@@ -126,7 +129,7 @@ export function notesToVoices(
   }
   const quantized: Quant[] = []
   for (const n of notes) {
-    const start = Math.max(0, Math.round(n.startSec / unit))
+    const start = Math.max(0, Math.round((n.startSec - phase) / unit))
     const dur = Math.max(1, Math.round(n.durSec / unit))
     quantized.push({ start, dur, pitch: midiToPitch(clampMidi(n.midi)), velocity: n.amplitude })
   }
