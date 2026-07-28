@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { KeyboardMusic, CircleDot, Square, X, Keyboard, Unplug } from 'lucide-react'
 import { INSTRUMENTS, instrumentByCode } from '../lib/luting'
 import {
+  MIDI_UNSUPPORTED,
   isMidiSupported,
   enableMidi,
   getMidiInput,
@@ -35,6 +36,9 @@ interface Props {
   onRecorded: (result: RecordResult) => void
 }
 
+/** How long a device request may run before the panel explains the wait. */
+const SLOW_MS = 2500
+
 /**
  * Topbar MIDI control: connect a hardware keyboard (Web MIDI) or the
  * on-screen simulator, play the luteboi voices live, and record takes onto
@@ -54,6 +58,9 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
   const [overdubOn, setOverdubOn] = useState(false)
   const [noteCount, setNoteCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  // a device request that has run long enough to be worth explaining
+  const [pending, setPending] = useState(false)
+  const pendingTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const instrumentRef = useRef(instrument)
   instrumentRef.current = instrument
@@ -149,18 +156,35 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
     return subscribePlaybackMode(warm)
   }, [activated, instrument])
 
+  useEffect(() => () => clearTimeout(pendingTimer.current), [])
+
   const connect = () => {
     setError(null)
     ensureLiveAudio() // needs this click's user gesture
     setActivated(true)
     setOpen(true)
     if (isMidiSupported()) {
-      // don't block the panel on the permission prompt
+      // Don't block the panel on the permission prompt — the simulator and the
+      // voices are usable while the browser makes up its mind. It can take a
+      // while: Firefox sits on a refusal for a random 3-13 seconds (see
+      // midi.ts), so say so rather than leaving an empty device list to explain
+      // itself.
+      pendingTimer.current = setTimeout(() => setPending(true), SLOW_MS)
+      const settled = () => {
+        clearTimeout(pendingTimer.current)
+        setPending(false)
+      }
       enableMidi()
-        .then(() => refreshDevices())
-        .catch((e) => setError(e instanceof Error ? e.message : 'MIDI access was denied.'))
+        .then(() => {
+          settled()
+          refreshDevices()
+        })
+        .catch((e) => {
+          settled()
+          setError(e instanceof Error ? e.message : 'MIDI access was denied.')
+        })
     } else {
-      setError('This browser has no Web MIDI — hardware needs Chrome or Edge. The on-screen keyboard still works.')
+      setError(`${MIDI_UNSUPPORTED} The on-screen keyboard still works.`)
     }
   }
 
@@ -266,6 +290,12 @@ export function MidiPanel({ bpm, luting, onRecorded }: Props) {
           </div>
 
           {error && <div className="midi-error">{error}</div>}
+          {pending && (
+            <div className="midi-hint">
+              Waiting on the browser for device access. Firefox takes its time about this, and
+              refuses outright if the controller isn't plugged in yet.
+            </div>
+          )}
 
           {activated && (
             <>

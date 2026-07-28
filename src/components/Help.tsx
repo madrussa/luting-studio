@@ -91,7 +91,8 @@ function StudioHelp() {
       <div className="help-section">
         <div className="help-title">MIDI keyboard</div>
         <ul className="help-list">
-          <li><strong>MIDI</strong> (top bar) connects a hardware keyboard or pad controller (Chrome/Edge only). Once connected it stays live even with the panel closed — pick any of the 20 voices and play it in real time.</li>
+          <li><strong>MIDI</strong> (top bar) connects a hardware keyboard or pad controller — Chrome, Edge or Firefox; Safari has no Web MIDI. Once connected it stays live even with the panel closed — pick any of the 20 voices and play it in real time.</li>
+          <li><strong>Plug the controller in first.</strong> The browser asks your permission the first time, and Firefox refuses when nothing is attached — taking a few seconds to say so, on purpose, so a page can't time the failure to spot your hardware.</li>
           <li>No hardware handy? The <strong>on-screen keyboard</strong> in the MIDI panel is a two-octave virtual device — click the keys or play the computer keyboard (<code>a s d f …</code> white keys, <code>w e t y …</code> black keys, <Key k="Z" />/<Key k="X" /> shift octaves), with a velocity slider. It behaves exactly like a plugged-in keyboard, recording included, and works in any browser.</li>
           <li><strong>Record a take</strong> captures what you play and adds it to the board as new voice(s). The take starts on your <strong>first note</strong> — no count-in — and notes are quantized to the luting grid (one <code>t1</code> unit = 60/BPM seconds), with simultaneous equal-length notes becoming chords and other overlaps split into extra voices, like the MIDI file converter.</li>
           <li>With the <strong>Drumkit</strong> voice selected, pads sending General MIDI drum notes land on the matching luteboi drum (kick, snare, hats…).</li>
