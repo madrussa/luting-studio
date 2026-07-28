@@ -15,7 +15,8 @@ notation used by [luteboi.com](https://luteboi.com/)
   grid, simultaneous equal-length notes become chords, overlapping lines are
   split into extra voices, and the GM drum channel is mapped onto the
   luteboi Drumkit (`id`).
-- **MIDI keyboard → luting** (Chrome/Edge) — connect a hardware keyboard or
+- **MIDI keyboard → luting** (Chrome, Edge and Firefox; Safari has no Web MIDI)
+  — connect a hardware keyboard or
   pad controller, play any of the 20 voices live, and record takes straight
   onto the board. Takes start on the first note, quantize to the `#lute`
   grid, group simultaneous notes into chords, spill other overlaps into
